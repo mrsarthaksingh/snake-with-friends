@@ -1,0 +1,16 @@
+{
+  "name": "snake-with-friends",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Snake With Friends — multiplayer snake for up to 20 players per room",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}

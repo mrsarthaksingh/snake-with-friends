@@ -1,0 +1,29 @@
+# Fly.io free tier · Mumbai (bom) for lower latency in India
+# Deploy: fly deploy
+# Share: https://<app>.fly.dev/?room=YOURCODE
+
+app = 'snake-with-friends'
+primary_region = 'bom'
+
+[build]
+
+[env]
+  PORT = '8080'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+  [http_service.concurrency]
+    type = 'connections'
+    hard_limit = 80
+    soft_limit = 60
+
+[[vm]]
+  memory = '256mb'
+  cpu_kind = 'shared'
+  cpus = 1
