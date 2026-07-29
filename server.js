@@ -41,29 +41,39 @@ const MAGNET_PULL_RADIUS = 200;
 const MAGNET_PULL_SPEED = 14;
 /** Cap wire size, but stay high enough that thinned paths still span full body length. */
 const MAX_SEGMENTS_SEND = 220;
-const MAX_BOTS = 0;
+const MAX_BOTS = 4;
 
 const BOT_NAMES = Object.freeze([
-  'Lag Lord',
-  'WiFi Warrior',
-  'Orb Goblin',
-  'Ping Menace',
-  'Snack Thief',
-  '404 Brain',
-  'Cope Serpent',
-  'Ratio Rex',
-  'Skill Issue',
-  'NPC Energy',
-  'Yeet Machine',
-  'Buffering Bob',
-  'Capslock Karen',
-  'Touch Grass',
-  'Cringe Coil',
-  'Noob Magnet',
-  'Wall Inspector',
-  'L + Booster',
-  'Ctrl Alt Defeat',
-  'Potato Aim',
+  'Priya',
+  'Ananya',
+  'Isha',
+  'Kavya',
+  'Meera',
+  'Diya',
+  'Sneha',
+  'Riya',
+  'Aisha',
+  'Neha',
+  'Aditi',
+  'Tanvi',
+  'Nisha',
+  'Kriti',
+  'Anvi',
+  'Myra',
+  'Kiara',
+  'Ishita',
+  'Divya',
+  'Swati',
+  'Jhanvi',
+  'Pooja',
+  'Shruti',
+  'Aanya',
+  'Sara',
+  'Zara',
+  'Payal',
+  'Lakshmi',
+  'Fatima',
+  'Sanya',
 ]);
 
 const POWER_ORB_TYPES = Object.freeze({
@@ -506,7 +516,7 @@ function countBots(room) {
 }
 
 function desiredBotCount() {
-  return 0;
+  return MAX_BOTS;
 }
 
 function pickBotName(room) {
@@ -515,7 +525,7 @@ function pickBotName(room) {
   if (free.length > 0) {
     return free[Math.floor(Math.random() * free.length)];
   }
-  return `Bot ${Math.floor(Math.random() * 90) + 10}`;
+  return BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)];
 }
 
 function removeOneBot(room) {
@@ -878,7 +888,8 @@ function buildLeaderboard(room) {
       name: snake.name,
       score: Math.floor(snake.score),
       color: snake.color,
-      isBot: Boolean(snake.isBot),
+      // Never mark bots on the wire — they should look like regular players.
+      isBot: false,
     }))
     .sort((a, b) => b.score - a.score)
     .slice(0, 10);
@@ -930,7 +941,7 @@ function buildSharedWireState(room) {
       hasSpeed: now < snake.speedUntil,
       hasShield: now < snake.shieldUntil,
       hasMagnet: now < snake.magnetUntil,
-      isBot: Boolean(snake.isBot),
+      isBot: false,
       spectating: Boolean(snake.spectating),
       segments: snake.alive ? flattenSegments(snake.segments, MAX_SEGMENTS_SEND) : [],
     });
@@ -947,14 +958,16 @@ function buildSharedWireState(room) {
       food.kind,
     ];
   }
+  const humanCount = countHumans(room);
+  const botCount = countBots(room);
   return {
     type: 'state',
     roomId: room.id,
     players,
     foods: foodWire,
     leaderboard: room.cachedLeaderboard,
-    playerCount: countHumans(room),
-    botCount: countBots(room),
+    playerCount: humanCount + botCount,
+    botCount: 0,
     maxPlayers: MAX_PLAYERS,
     match: {
       phase: room.match.phase,
