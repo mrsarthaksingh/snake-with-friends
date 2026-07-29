@@ -5,7 +5,8 @@
   "description": "Snake With Friends — multiplayer snake for up to 20 players per room",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=18"

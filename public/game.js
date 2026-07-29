@@ -27,6 +27,14 @@ const radarCanvas = document.getElementById('radar');
 const radarCtx = radarCanvas.getContext('2d');
 const powerPill = document.getElementById('powerPill');
 const boostButton = document.getElementById('boostButton');
+const startRoundButton = document.getElementById('startRoundButton');
+const matchTimerPill = document.getElementById('matchTimerPill');
+const matchEventTeaser = document.getElementById('matchEventTeaser');
+const eventBanner = document.getElementById('eventBanner');
+const eventBannerText = document.getElementById('eventBannerText');
+const podiumOverlay = document.getElementById('podiumOverlay');
+const podiumList = document.getElementById('podiumList');
+const spectateNote = document.getElementById('spectateNote');
 
 const FOOD_DRAW_RADIUS = 1500;
 
@@ -89,6 +97,8 @@ let radarFrame = 0;
 /** @type {Map<string, { headX: number, headY: number, angle: number, beads: { x: number, y: number }[] }>} */
 const renderBodyById = new Map();
 const BEAD_SPACING = 8.5;
+/** Keep in sync with server desiredCount = floor(score). */
+const MAX_RENDER_BEADS = 400;
 let boostHeldByButton = false;
 let boostHeldByPointer = false;
 let activePointerId = null;
@@ -339,6 +349,77 @@ function showFunnyDeath(line) {
   enqueueDeathAnnounce(line);
 }
 
+function formatRemaining(ms) {
+  const clamped = Math.max(0, Math.ceil(ms / 1000));
+  const m = Math.floor(clamped / 60);
+  const s = clamped % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function updateMatchUi(matchState, players) {
+  if (!matchState) {
+    return;
+  }
+  const now = Date.now();
+  const self = players.find((p) => p.id === playerId);
+  const isSpectating = Boolean(self && self.spectating);
+  if (spectateNote) {
+    spectateNote.hidden = !isSpectating;
+  }
+  if (startRoundButton) {
+    startRoundButton.hidden = !(
+      matchState.phase === 'waiting' && matchState.humanCount >= 2
+    );
+  }
+  const showTimer = matchState.phase === 'countdown' || matchState.phase === 'playing';
+  if (matchTimerPill) {
+    matchTimerPill.hidden = !showTimer;
+    if (showTimer) {
+      matchTimerPill.textContent =
+        matchState.phase === 'countdown'
+          ? `Start ${formatRemaining(matchState.phaseEndsAt - now)}`
+          : `Round ${formatRemaining(matchState.phaseEndsAt - now)}`;
+    }
+  }
+  if (matchEventTeaser) {
+    if (matchState.nextEvent && matchState.phase === 'playing') {
+      matchEventTeaser.hidden = false;
+      matchEventTeaser.textContent = `${matchState.nextEvent.name} in ${formatRemaining(matchState.nextEvent.startsInMs)}`;
+    } else {
+      matchEventTeaser.hidden = true;
+    }
+  }
+  if (eventBanner && eventBannerText) {
+    if (matchState.activeBanner && now < matchState.activeBanner.untilMs) {
+      eventBanner.hidden = false;
+      eventBannerText.textContent = matchState.activeBanner.name;
+    } else {
+      eventBanner.hidden = true;
+    }
+  }
+  if (podiumOverlay && podiumList) {
+    if (matchState.phase === 'podium') {
+      podiumOverlay.hidden = false;
+      deathOverlay.hidden = true;
+      podiumList.innerHTML = '';
+      for (const entry of (matchState.podium || []).slice(0, 3)) {
+        const li = document.createElement('li');
+        li.textContent = `#${entry.place} ${entry.name} — ${entry.score} (${entry.kills} kills)`;
+        podiumList.appendChild(li);
+      }
+    } else {
+      podiumOverlay.hidden = true;
+    }
+  }
+  if (isSpectating && matchState.phase !== 'waiting') {
+    respawnButton.disabled = true;
+    respawnButton.textContent = 'Wait for next round';
+  } else {
+    respawnButton.disabled = false;
+    respawnButton.textContent = 'Play again';
+  }
+}
+
 function handleMessage(message) {
   switch (message.type) {
     case 'hello':
@@ -380,6 +461,7 @@ function handleMessage(message) {
     case 'state': {
       latestState = inflateState(message);
       stateTime = performance.now();
+      updateMatchUi(message.match, message.players);
       const self = getSelfSnake(latestState);
       scorePill.textContent = `Score ${self && self.alive ? self.score : 0}`;
       playersPill.textContent = formatPlayersPill(latestState);
@@ -410,7 +492,16 @@ function handleMessage(message) {
       deathLine.textContent = message.line || 'Oof.';
       deathScore.textContent = `Score ${message.score}`;
       joinOverlay.hidden = true;
-      deathOverlay.hidden = false;
+      if (!podiumOverlay || podiumOverlay.hidden) {
+        deathOverlay.hidden = false;
+      }
+      break;
+    case 'spectating':
+      respawnButton.disabled = true;
+      respawnButton.textContent = 'Wait for next round';
+      if (spectateNote) {
+        spectateNote.hidden = false;
+      }
       break;
     case 'killFeed':
       showFunnyDeath(message.line);
@@ -483,14 +574,77 @@ function lerpAngle(from, to, amount) {
 }
 
 /**
- * Local bead bodies follow a smoothed head only.
- * Never rebuild from jumpy server body points — that was causing the shake.
+ * Resample points evenly along a polyline so thinned server paths still
+ * draw at full score-based length (fixes "stopped growing" + invisible tails).
+ * @param {{ x: number, y: number }[]} points
+ * @param {number} count
+ * @returns {{ x: number, y: number }[]}
+ */
+function resamplePolyline(points, count) {
+  if (count <= 0) {
+    return [];
+  }
+  if (points.length === 0) {
+    return [];
+  }
+  if (points.length === 1 || count === 1) {
+    return Array.from({ length: count }, () => ({ x: points[0].x, y: points[0].y }));
+  }
+  const segmentLengths = [];
+  let total = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    const span = Math.hypot(points[index].x - points[index - 1].x, points[index].y - points[index - 1].y);
+    segmentLengths.push(span);
+    total += span;
+  }
+  if (total < 0.0001) {
+    return Array.from({ length: count }, () => ({ x: points[0].x, y: points[0].y }));
+  }
+  const result = new Array(count);
+  result[0] = { x: points[0].x, y: points[0].y };
+  for (let bead = 1; bead < count; bead += 1) {
+    const target = (bead / (count - 1)) * total;
+    let walked = 0;
+    let placed = false;
+    for (let index = 0; index < segmentLengths.length; index += 1) {
+      const nextWalk = walked + segmentLengths[index];
+      if (target <= nextWalk || index === segmentLengths.length - 1) {
+        const span = segmentLengths[index] || 1;
+        const t = Math.min(1, Math.max(0, (target - walked) / span));
+        const from = points[index];
+        const to = points[index + 1];
+        result[bead] = {
+          x: from.x + (to.x - from.x) * t,
+          y: from.y + (to.y - from.y) * t,
+        };
+        placed = true;
+        break;
+      }
+      walked = nextWalk;
+    }
+    if (!placed) {
+      const last = points[points.length - 1];
+      result[bead] = { x: last.x, y: last.y };
+    }
+  }
+  return result;
+}
+
+function desiredBeadCount(player) {
+  const fromScore = Number.isFinite(player.score) ? Math.floor(player.score) : 0;
+  return Math.max(1, Math.min(MAX_RENDER_BEADS, Math.max(player.segments.length, fromScore)));
+}
+
+/**
+ * Local snake: smooth head follow (stable camera).
+ * Remote snakes: densify server path so collision body matches what you see.
  */
 function buildRenderState(deltaMs) {
   if (!latestState) {
     return null;
   }
   const headFollow = 1 - Math.exp(-deltaMs / 72);
+  const pathFollow = 1 - Math.exp(-deltaMs / 55);
   const seen = new Set();
   const players = latestState.players.map((player) => {
     seen.add(player.id);
@@ -499,14 +653,51 @@ function buildRenderState(deltaMs) {
       return player;
     }
     const targetHead = player.segments[0];
-    const desiredCount = Math.max(1, player.segments.length);
+    const desiredCount = desiredBeadCount(player);
+    const isSelf = player.id === playerId;
     let body = renderBodyById.get(player.id);
+    if (!isSelf) {
+      const pathBeads = resamplePolyline(player.segments, desiredCount);
+      if (!body || body.beads.length === 0) {
+        body = {
+          headX: pathBeads[0].x,
+          headY: pathBeads[0].y,
+          angle: player.angle,
+          beads: pathBeads,
+        };
+        renderBodyById.set(player.id, body);
+      } else {
+        while (body.beads.length < desiredCount) {
+          const tip = body.beads[body.beads.length - 1] ?? pathBeads[pathBeads.length - 1];
+          body.beads.push({ x: tip.x, y: tip.y });
+        }
+        while (body.beads.length > desiredCount) {
+          body.beads.pop();
+        }
+        for (let index = 0; index < desiredCount; index += 1) {
+          const target = pathBeads[index] ?? pathBeads[pathBeads.length - 1];
+          const current = body.beads[index] ?? target;
+          body.beads[index] = {
+            x: lerp(current.x, target.x, pathFollow),
+            y: lerp(current.y, target.y, pathFollow),
+          };
+        }
+        body.headX = body.beads[0].x;
+        body.headY = body.beads[0].y;
+        body.angle = lerpAngle(body.angle, player.angle, pathFollow);
+      }
+      return {
+        ...player,
+        segments: body.beads,
+        angle: body.angle,
+      };
+    }
     if (!body || body.beads.length === 0) {
       body = {
         headX: targetHead.x,
         headY: targetHead.y,
         angle: player.angle,
-        beads: player.segments.map((segment) => ({ x: segment.x, y: segment.y })),
+        beads: resamplePolyline(player.segments, desiredCount),
       };
       renderBodyById.set(player.id, body);
     } else {
@@ -516,7 +707,7 @@ function buildRenderState(deltaMs) {
         body.headX = targetHead.x;
         body.headY = targetHead.y;
         body.angle = player.angle;
-        body.beads = player.segments.map((segment) => ({ x: segment.x, y: segment.y }));
+        body.beads = resamplePolyline(player.segments, desiredCount);
       } else {
         body.headX = lerp(body.headX, targetHead.x, headFollow);
         body.headY = lerp(body.headY, targetHead.y, headFollow);
@@ -574,9 +765,14 @@ function drawBackground(camera, zoom) {
   ctx.fillStyle = '#050d18';
   ctx.fillRect(0, 0, width, height);
 
+  const insetRatio = latestState?.match?.arenaInsetRatio || 0;
+  const inset = insetRatio * mapSize;
+  const arenaMin = inset;
+  const arenaMax = mapSize - inset;
+
   // Outside the arena — danger zone
-  const topLeft = worldToScreen({ x: 0, y: 0 }, camera, zoom);
-  const bottomRight = worldToScreen({ x: mapSize, y: mapSize }, camera, zoom);
+  const topLeft = worldToScreen({ x: arenaMin, y: arenaMin }, camera, zoom);
+  const bottomRight = worldToScreen({ x: arenaMax, y: arenaMax }, camera, zoom);
   const arenaX = topLeft.x;
   const arenaY = topLeft.y;
   const arenaW = bottomRight.x - topLeft.x;
@@ -625,6 +821,11 @@ function drawRadar(state) {
   const size = radarCanvas.width;
   const padding = 8;
   const playSize = size - padding * 2;
+  const insetRatio = state.match?.arenaInsetRatio || 0;
+  const inset = insetRatio * mapSize;
+  const arenaMin = inset;
+  const arenaMax = mapSize - inset;
+  const arenaSpan = arenaMax - arenaMin;
   radarCtx.clearRect(0, 0, size, size);
   radarCtx.fillStyle = 'rgba(5, 13, 24, 0.95)';
   radarCtx.fillRect(0, 0, size, size);
@@ -645,8 +846,8 @@ function drawRadar(state) {
   const alivePlayers = state.players.filter((player) => player.alive && player.segments.length > 0);
   for (const player of alivePlayers) {
     const head = player.segments[0];
-    const x = padding + (head.x / mapSize) * playSize;
-    const y = padding + (head.y / mapSize) * playSize;
+    const x = padding + ((head.x - arenaMin) / arenaSpan) * playSize;
+    const y = padding + ((head.y - arenaMin) / arenaSpan) * playSize;
     const isYou = player.id === playerId;
     const dot = isYou ? 5.5 : 3.8;
     radarCtx.beginPath();
@@ -842,6 +1043,26 @@ function drawCuteFace(headX, headY, angle, radius, isBoosting) {
   ctx.stroke();
 }
 
+function isSnakeNearViewport(snake, camera, zoom) {
+  const margin = 120 + snake.radius * zoom * 2;
+  const maxX = window.innerWidth + margin;
+  const maxY = window.innerHeight + margin;
+  for (let index = 0; index < snake.segments.length; index += Math.max(1, Math.floor(snake.segments.length / 24))) {
+    const point = worldToScreen(snake.segments[index], camera, zoom);
+    if (point.x >= -margin && point.y >= -margin && point.x <= maxX && point.y <= maxY) {
+      return true;
+    }
+  }
+  const tail = snake.segments[snake.segments.length - 1];
+  if (tail) {
+    const point = worldToScreen(tail, camera, zoom);
+    if (point.x >= -margin && point.y >= -margin && point.x <= maxX && point.y <= maxY) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function drawSnake(snake, camera, zoom) {
   if (!snake.alive || snake.segments.length === 0) {
     return;
@@ -849,10 +1070,9 @@ function drawSnake(snake, camera, zoom) {
   const radius = Math.max(4, snake.radius * zoom);
   const isSelf = snake.id === playerId;
   const head = worldToScreen(snake.segments[0], camera, zoom);
-  if (
-    !isSelf &&
-    (head.x < -80 || head.y < -80 || head.x > window.innerWidth + 80 || head.y > window.innerHeight + 80)
-  ) {
+  // Long snakes can kill with a body that crosses the screen while the head is off-camera —
+  // do not cull by head alone.
+  if (!isSelf && !isSnakeNearViewport(snake, camera, zoom)) {
     return;
   }
   // Draw beads tail → head so the head sits on top (classic 000000000 look).
@@ -992,9 +1212,20 @@ joinForm.addEventListener('submit', (event) => {
 });
 
 respawnButton.addEventListener('click', () => {
+  if (respawnButton.disabled) {
+    return;
+  }
   deathOverlay.hidden = true;
   send({ type: 'respawn', ...getJoinPayload() });
 });
+
+if (startRoundButton) {
+  startRoundButton.addEventListener('click', () => {
+    if (socket && socket.readyState === 1) {
+      socket.send(JSON.stringify({ type: 'startRound' }));
+    }
+  });
+}
 
 window.addEventListener('mousemove', (event) => {
   if (!joined || !deathOverlay.hidden) {
