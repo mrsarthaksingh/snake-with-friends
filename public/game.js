@@ -516,11 +516,7 @@ function handleMessage(message) {
 
 function formatPlayersPill(state) {
   const humans = state.playerCount ?? 0;
-  const bots = state.botCount ?? 0;
   const max = state.maxPlayers ?? 20;
-  if (bots > 0) {
-    return `${humans} / ${max} · ${bots} bots`;
-  }
   return `${humans} / ${max}`;
 }
 
@@ -529,7 +525,7 @@ function renderLeaderboard(state) {
     .map((entry, index) => {
       const isYou = entry.id === playerId;
       return `<li class="${isYou ? 'you' : ''}">
-        <span class="name"><span class="dot" style="background:${entry.color}"></span>${index + 1}. ${escapeHtml(entry.name)}${entry.isBot ? ' 🤖' : ''}</span>
+        <span class="name"><span class="dot" style="background:${entry.color}"></span>${index + 1}. ${escapeHtml(entry.name)}</span>
         <span>${entry.score}</span>
       </li>`;
     })
@@ -1121,7 +1117,7 @@ function drawSnake(snake, camera, zoom) {
   drawCuteFace(head.x, head.y, snake.angle, radius, Boolean(snake.boosting || snake.hasSpeed));
   if (isSelf || zoom > 0.7) {
     drawSnakeNameLabel(
-      isSelf ? `${snake.name} (you)` : snake.isBot ? `${snake.name} 🤖` : snake.name,
+      isSelf ? `${snake.name} (you)` : snake.name,
       head.x,
       head.y - radius - Math.max(10, radius * 0.7),
       0,
