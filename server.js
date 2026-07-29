@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { WebSocketServer } = require('ws');
+const match = require('./match');
 
 const PORT = Number(process.env.PORT || process.env.SNAKE_PORT) || 3848;
 const DEFAULT_ROOM_ID = 'LOBBY';
@@ -34,7 +35,8 @@ const SHIELD_POWER_MS = 6000;
 const MAGNET_POWER_MS = 10000;
 const MAGNET_PULL_RADIUS = 200;
 const MAGNET_PULL_SPEED = 14;
-const MAX_SEGMENTS_SEND = 80;
+/** Cap wire size, but stay high enough that thinned paths still span full body length. */
+const MAX_SEGMENTS_SEND = 220;
 const MAX_BOTS = 0;
 
 const BOT_NAMES = Object.freeze([
@@ -99,6 +101,8 @@ const MIME_TYPES = Object.freeze({
  *   shieldUntil: number,
  *   magnetUntil: number,
  *   isBot: boolean,
+ *   spectating: boolean,
+ *   roundScoreLocked: boolean,
  *   socket: import('ws').WebSocket | { readyState: number },
  * }} Snake
  */
@@ -112,6 +116,7 @@ const MIME_TYPES = Object.freeze({
  *   cachedLeaderboard: Array<{ id: string, name: string, score: number, color: string, isBot: boolean }>,
  *   foodIdCounter: number,
  *   lastActiveAt: number,
+ *   match: ReturnType<typeof match.createMatchState>,
  * }} Room
  */
 
@@ -141,6 +146,7 @@ function createRoom(roomId) {
     cachedLeaderboard: [],
     foodIdCounter: 1,
     lastActiveAt: Date.now(),
+    match: match.createMatchState(),
   };
 }
 
@@ -330,6 +336,8 @@ function createSnake(room, socket, name, requestedColor, options = {}) {
     shieldUntil: 0,
     magnetUntil: 0,
     isBot: Boolean(options.isBot),
+    spectating: false,
+    roundScoreLocked: false,
     socket,
   };
 }
@@ -420,7 +428,15 @@ function killSnake(room, snake, options = {}) {
   snake.boosting = false;
   dropFoodFromSnake(room, snake);
   const killerName = typeof options.killerName === 'string' ? options.killerName : null;
+  const killerId = typeof options.killerId === 'string' ? options.killerId : null;
   const cause = options.cause === 'wall' ? 'wall' : killerName ? 'snake' : 'unknown';
+  if (cause === 'snake' && killerId) {
+    const killer = room.snakes.get(killerId);
+    if (killer) {
+      killer.score += match.KILL_SCORE_BONUS;
+      match.recordKill(room.match, killer.id);
+    }
+  }
   const line =
     cause === 'wall'
       ? pickFunnyLine(WALL_LINES, 'Wall', snake.name)
@@ -612,6 +628,20 @@ function maintainFoodCount(room) {
   }
 }
 
+/**
+ * @param {Room} room
+ * @param {FoodKind} [kind]
+ */
+function createRandomFood(room, kind = 'normal') {
+  createFoodAt(
+    room,
+    randomRange(40, MAP_SIZE - 40),
+    randomRange(40, MAP_SIZE - 40),
+    kind === 'mega' ? 12 : 1,
+    kind,
+  );
+}
+
 function turnToward(current, target, maxTurn) {
   let delta = wrapAngle(target - current);
   if (delta > maxTurn) delta = maxTurn;
@@ -621,13 +651,14 @@ function turnToward(current, target, maxTurn) {
 
 const BORDER_PADDING = 8;
 
-function isInsideArena(point, radius) {
+function isInsideArena(point, radius, insetRatio = 0) {
+  const bounds = match.arenaBounds(MAP_SIZE, insetRatio);
   const edge = BORDER_PADDING + radius;
   return (
-    point.x >= edge &&
-    point.y >= edge &&
-    point.x <= MAP_SIZE - edge &&
-    point.y <= MAP_SIZE - edge
+    point.x >= bounds.min + edge &&
+    point.y >= bounds.min + edge &&
+    point.x <= bounds.max - edge &&
+    point.y <= bounds.max - edge
   );
 }
 
@@ -689,7 +720,7 @@ function moveSnake(room, snake) {
     y: head.y + Math.sin(snake.angle) * speed,
   };
   const radius = radiusForSnake(snake);
-  if (!isInsideArena(nextHead, radius * 0.7)) {
+  if (!isInsideArena(nextHead, radius * 0.7, room.match.arenaInsetRatio)) {
     killSnake(room, snake, { cause: 'wall' });
     return;
   }
@@ -765,13 +796,15 @@ function collideSnakes(room) {
       continue;
     }
     const head = snake.segments[0];
-    const headRadius = radiusForSnake(snake) * 0.85;
+    // Use near-core radii so oversized snakes don't create phantom hit bubbles.
+    const headRadius = Math.max(MIN_RADIUS * 0.7, radiusForSnake(snake) * 0.55);
     for (const other of alive) {
       if (other.id === snake.id || killerByVictim.has(other.id)) {
         continue;
       }
-      const bodyRadius = radiusForSnake(other) * 0.75;
-      for (let index = 2; index < other.segments.length; index += 2) {
+      const bodyRadius = Math.max(MIN_RADIUS * 0.65, radiusForSnake(other) * 0.5);
+      // Skip the first few neck segments to reduce head-on false positives.
+      for (let index = 4; index < other.segments.length; index += 1) {
         const segment = other.segments[index];
         if (distance(head, segment) <= headRadius + bodyRadius) {
           killerByVictim.set(snake.id, other.id);
@@ -790,6 +823,7 @@ function collideSnakes(room) {
       killSnake(room, victim, {
         cause: 'snake',
         killerName: killer ? killer.name : 'Someone',
+        killerId: killer ? killer.id : null,
       });
     }
   }
@@ -856,6 +890,7 @@ function buildSharedWireState(room) {
       hasShield: now < snake.shieldUntil,
       hasMagnet: now < snake.magnetUntil,
       isBot: Boolean(snake.isBot),
+      spectating: Boolean(snake.spectating),
       segments: snake.alive ? flattenSegments(snake.segments, MAX_SEGMENTS_SEND) : [],
     });
   }
@@ -880,6 +915,16 @@ function buildSharedWireState(room) {
     playerCount: countHumans(room),
     botCount: countBots(room),
     maxPlayers: MAX_PLAYERS,
+    match: {
+      phase: room.match.phase,
+      phaseEndsAt: room.match.phaseEndsAt,
+      roundStartedAt: room.match.roundStartedAt,
+      arenaInsetRatio: room.match.arenaInsetRatio,
+      activeBanner: room.match.activeBanner,
+      podium: room.match.podium,
+      nextEvent: match.getNextEventTeaser(room.match, Date.now()),
+      humanCount: countHumans(room),
+    },
   };
 }
 
@@ -896,6 +941,37 @@ function broadcastStates(room) {
 }
 
 function tickRoom(room) {
+  const now = Date.now();
+  const tickResult = match.tickMatch(room.match, now);
+  for (const event of tickResult.eventsFired) {
+    if (event.id === 'orb_rain') {
+      for (let index = 0; index < 40; index += 1) {
+        createRandomFood(room, Math.random() < 0.2 ? 'mega' : 'normal');
+      }
+    }
+    broadcastKillFeed(room, {
+      type: 'killFeed',
+      line: `⚡ ${event.name}!`,
+      cause: 'event',
+      killerName: null,
+      victimName: event.name,
+    });
+  }
+  if (tickResult.transitionedTo === 'podium') {
+    room.match.podium = match.buildPodium(room.match, room.snakes);
+    for (const snake of room.snakes.values()) {
+      snake.alive = false;
+      snake.spectating = true;
+    }
+  }
+  if (tickResult.transitionedTo === 'waiting') {
+    for (const snake of room.snakes.values()) {
+      if (snake.isBot) {
+        continue;
+      }
+      snake.spectating = false;
+    }
+  }
   maintainBots(room);
   pullFoodTowardMagnets(room);
   for (const snake of room.snakes.values()) {
@@ -966,6 +1042,14 @@ function handleJoin(socket, payload) {
   const rawName = typeof payload.name === 'string' ? payload.name.trim() : '';
   const name = rawName.slice(0, 14) || `Snake ${countHumans(room) + 1}`;
   const snake = createSnake(room, socket, name, payload.color);
+  const isRoundActive =
+    room.match.phase === 'playing' ||
+    room.match.phase === 'countdown' ||
+    room.match.phase === 'podium';
+  if (isRoundActive) {
+    snake.alive = false;
+    snake.spectating = true;
+  }
   room.snakes.set(snake.id, snake);
   socketToMeta.set(socket, { roomId: room.id, snakeId: snake.id });
   maintainBots(room);
@@ -990,13 +1074,80 @@ function handleInput(socket, payload) {
   snake.boosting = Boolean(payload.boost);
 }
 
+/**
+ * @param {Room} room
+ * @param {Snake} snake
+ */
+function respawnSnakeInPlace(room, snake) {
+  const spawn = clampToMap({
+    x: randomRange(MAP_SIZE * 0.2, MAP_SIZE * 0.8),
+    y: randomRange(MAP_SIZE * 0.2, MAP_SIZE * 0.8),
+  });
+  const angle = randomRange(-Math.PI, Math.PI);
+  /** @type {Point[]} */
+  const segments = [];
+  for (let index = 0; index < START_SEGMENTS; index += 1) {
+    segments.push({
+      x: spawn.x - Math.cos(angle) * index * SEGMENT_SPACING,
+      y: spawn.y - Math.sin(angle) * index * SEGMENT_SPACING,
+    });
+  }
+  snake.angle = angle;
+  snake.targetAngle = angle;
+  snake.boosting = false;
+  snake.segments = segments;
+  snake.score = START_SEGMENTS;
+  snake.alive = true;
+  snake.spawnProtectedUntil = Date.now() + 2500;
+  snake.speedUntil = 0;
+  snake.shieldUntil = 0;
+  snake.magnetUntil = 0;
+  snake.spectating = false;
+  snake.roundScoreLocked = false;
+}
+
+function handleStartRound(socket) {
+  const room = getRoomBySocket(socket);
+  if (!room) {
+    sendError(socket, 'Join a room first.');
+    return;
+  }
+  const humans = [...room.snakes.values()].filter((snake) => !snake.isBot);
+  if (!match.canStartRound(humans.length, room.match.phase)) {
+    sendError(socket, 'Need 2 players in the lobby to start.');
+    return;
+  }
+  match.beginCountdown(
+    room.match,
+    Date.now(),
+    humans.map((snake) => snake.id),
+  );
+  for (const snake of humans) {
+    if (!snake.alive) {
+      respawnSnakeInPlace(room, snake);
+    }
+    snake.spectating = false;
+    snake.roundScoreLocked = false;
+  }
+}
+
 function handleRespawn(socket, payload) {
   const existing = getSnakeBySocket(socket);
-  if (existing) {
-    const room = getRoomBySocket(socket);
-    if (room) {
-      room.snakes.delete(existing.id);
+  const room = getRoomBySocket(socket);
+  if (existing && room) {
+    if (
+      room.match.phase === 'playing' ||
+      room.match.phase === 'countdown' ||
+      room.match.phase === 'podium'
+    ) {
+      existing.spectating = true;
+      existing.alive = false;
+      if (socket.readyState === 1) {
+        socket.send(JSON.stringify({ type: 'spectating', reason: 'round' }));
+      }
+      return;
     }
+    room.snakes.delete(existing.id);
     socketToMeta.delete(socket);
   }
   handleJoin(socket, payload);
@@ -1046,6 +1197,9 @@ function handleMessage(socket, raw) {
       break;
     case 'respawn':
       handleRespawn(socket, payload);
+      break;
+    case 'startRound':
+      handleStartRound(socket);
       break;
     case 'ping':
       handlePing(socket, payload);
