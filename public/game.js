@@ -821,6 +821,11 @@ function drawRadar(state) {
   const size = radarCanvas.width;
   const padding = 8;
   const playSize = size - padding * 2;
+  const insetRatio = state.match?.arenaInsetRatio || 0;
+  const inset = insetRatio * mapSize;
+  const arenaMin = inset;
+  const arenaMax = mapSize - inset;
+  const arenaSpan = arenaMax - arenaMin;
   radarCtx.clearRect(0, 0, size, size);
   radarCtx.fillStyle = 'rgba(5, 13, 24, 0.95)';
   radarCtx.fillRect(0, 0, size, size);
@@ -841,8 +846,8 @@ function drawRadar(state) {
   const alivePlayers = state.players.filter((player) => player.alive && player.segments.length > 0);
   for (const player of alivePlayers) {
     const head = player.segments[0];
-    const x = padding + (head.x / mapSize) * playSize;
-    const y = padding + (head.y / mapSize) * playSize;
+    const x = padding + ((head.x - arenaMin) / arenaSpan) * playSize;
+    const y = padding + ((head.y - arenaMin) / arenaSpan) * playSize;
     const isYou = player.id === playerId;
     const dot = isYou ? 5.5 : 3.8;
     radarCtx.beginPath();
