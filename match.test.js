@@ -58,6 +58,20 @@ describe('match', () => {
     assert.equal(podium[2].id, 'c');
   });
 
+  it('ranks podium ties by participant join order', () => {
+    const state = match.createMatchState();
+    state.phase = 'podium';
+    state.participantIds = ['a', 'b'];
+    state.killsByPlayerId = { a: 3, b: 3 };
+    const snakes = new Map([
+      ['a', { id: 'a', name: 'Zebra', score: 50 }],
+      ['b', { id: 'b', name: 'Alpha', score: 50 }],
+    ]);
+    const podium = match.buildPodium(state, snakes);
+    assert.equal(podium[0].id, 'a');
+    assert.equal(podium[1].id, 'b');
+  });
+
   it('arenaBounds applies inset', () => {
     const bounds = match.arenaBounds(5000, 0.12);
     assert.equal(bounds.min, 600);

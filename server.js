@@ -840,8 +840,18 @@ function collideSnakes(room) {
 }
 
 function buildLeaderboard(room) {
+  const isRoundPhase =
+    room.match.phase === 'playing' ||
+    room.match.phase === 'countdown' ||
+    room.match.phase === 'podium';
+  const participantIds = isRoundPhase ? new Set(room.match.participantIds) : null;
   return [...room.snakes.values()]
-    .filter((snake) => snake.alive)
+    .filter((snake) => {
+      if (snake.alive) {
+        return true;
+      }
+      return isRoundPhase && !snake.isBot && participantIds.has(snake.id);
+    })
     .map((snake) => ({
       id: snake.id,
       name: snake.name,
@@ -983,18 +993,22 @@ function tickRoom(room) {
     }
   }
   maintainBots(room);
-  pullFoodTowardMagnets(room);
-  for (const snake of room.snakes.values()) {
-    if (!snake.alive) {
-      continue;
+  const isFreeroamPhase =
+    room.match.phase === 'waiting' || room.match.phase === 'playing';
+  if (isFreeroamPhase) {
+    pullFoodTowardMagnets(room);
+    for (const snake of room.snakes.values()) {
+      if (!snake.alive) {
+        continue;
+      }
+      if (snake.isBot) {
+        updateBotBrain(room, snake);
+      }
+      moveSnake(room, snake);
+      eatFood(room, snake);
     }
-    if (snake.isBot) {
-      updateBotBrain(room, snake);
-    }
-    moveSnake(room, snake);
-    eatFood(room, snake);
+    collideSnakes(room);
   }
-  collideSnakes(room);
   maintainFoodCount(room);
   room.tickCount += 1;
   if (room.tickCount % NET_EVERY_TICKS === 0) {
@@ -1133,11 +1147,7 @@ function handleStartRound(socket) {
     humans.map((snake) => snake.id),
   );
   for (const snake of humans) {
-    if (!snake.alive) {
-      respawnSnakeInPlace(room, snake);
-    }
-    snake.spectating = false;
-    snake.roundScoreLocked = false;
+    respawnSnakeInPlace(room, snake);
   }
 }
 

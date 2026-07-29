@@ -167,7 +167,7 @@ function buildPodium(match, snakesById) {
       if (right.kills !== left.kills) {
         return right.kills - left.kills;
       }
-      return left.name.localeCompare(right.name);
+      return match.participantIds.indexOf(left.id) - match.participantIds.indexOf(right.id);
     })
     .slice(0, 10)
     .map((entry, index) => ({
