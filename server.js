@@ -19,8 +19,12 @@ const TICK_MS = 1000 / TICK_RATE;
 /** Network snapshots per second (physics stays at TICK_RATE). */
 const NET_RATE = 30;
 const NET_EVERY_TICKS = Math.max(1, Math.round(TICK_RATE / NET_RATE));
-const FOOD_COUNT = 320;
-const POWER_ORB_TARGET = 24;
+const FOOD_COUNT = 900;
+const POWER_ORB_TARGET = 48;
+/** Max orbs one death can spray (keeps explosions readable). */
+const DEATH_DROP_MAX = 52;
+/** Spray radius in world units around the kill point. */
+const DEATH_SPRAY_RADIUS = 68;
 const START_SEGMENTS = 12;
 const SEGMENT_SPACING = 9;
 const BASE_SPEED = 9.0;
@@ -342,11 +346,28 @@ function createSnake(room, socket, name, requestedColor, options = {}) {
   };
 }
 
+/**
+ * Spray orbs in a tight burst at the kill — never along the whole body trail
+ * (that left sparse “0   0   0” crumbs nobody could reach).
+ */
 function dropFoodFromSnake(room, snake) {
-  const step = Math.max(2, Math.floor(snake.segments.length / 18));
-  for (let index = 0; index < snake.segments.length; index += step) {
-    const segment = snake.segments[index];
-    createFoodAt(room, segment.x + randomRange(-6, 6), segment.y + randomRange(-6, 6), 2);
+  if (snake.segments.length === 0) {
+    return;
+  }
+  const head = snake.segments[0];
+  const dropCount = Math.min(
+    DEATH_DROP_MAX,
+    Math.max(12, Math.floor(snake.score / 2.2)),
+  );
+  for (let index = 0; index < dropCount; index += 1) {
+    const angle = randomRange(-Math.PI, Math.PI);
+    // Bias toward the center so loot feels like a spray, not a ring.
+    const dist = Math.pow(Math.random(), 0.5) * DEATH_SPRAY_RADIUS;
+    const point = clampToMap({
+      x: head.x + Math.cos(angle) * dist,
+      y: head.y + Math.sin(angle) * dist,
+    });
+    createFoodAt(room, point.x, point.y, 2);
   }
 }
 
