@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Manrope:wght@500;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=12" />
+    <link rel="stylesheet" href="/styles.css?v=13" />
   </head>
   <body>
     <canvas id="game"></canvas>
@@ -27,6 +27,10 @@
         <div class="pill" id="playersPill">0 / 20</div>
         <div class="pill" id="pingPill">Ping —</div>
         <div class="pill powers" id="powerPill" hidden>Powers</div>
+        <div class="pill match-timer-pill" id="matchTimerPill" hidden>Round —</div>
+        <div class="pill match-event-teaser" id="matchEventTeaser" hidden></div>
+        <button type="button" class="start-round-btn" id="startRoundButton" hidden>Start round</button>
+        <p class="spectate-note" id="spectateNote" hidden>Spectating — next round soon</p>
       </div>
       <div class="radar-wrap">
         <p class="radar-label">Radar</p>
@@ -85,6 +89,17 @@
         <p class="death-line" id="deathLine">Oof.</p>
         <p class="lede" id="deathScore">Score 0</p>
         <button type="button" id="respawnButton">Play again</button>
+      </div>
+    </section>
+
+    <div class="event-banner" id="eventBanner" hidden>
+      <p id="eventBannerText">Orb Rain</p>
+    </div>
+    <section class="overlay" id="podiumOverlay" hidden>
+      <div class="card podium-card">
+        <h2>Round over</h2>
+        <ol id="podiumList"></ol>
+        <p class="lede" id="podiumSub">Next lobby in a moment…</p>
       </div>
     </section>
 
