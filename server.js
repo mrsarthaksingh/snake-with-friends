@@ -443,6 +443,13 @@ function killSnake(room, snake, options = {}) {
       : killerName
         ? pickFunnyLine(KILL_LINES, killerName, snake.name)
         : `${snake.name} somehow exploded. Science is baffled.`;
+  const isActiveRoundPhase =
+    room.match.phase === 'playing' ||
+    room.match.phase === 'countdown' ||
+    room.match.phase === 'podium';
+  if (!snake.isBot && isActiveRoundPhase) {
+    snake.spectating = true;
+  }
   if (!snake.isBot && snake.socket.readyState === 1) {
     snake.socket.send(
       JSON.stringify({
@@ -453,6 +460,9 @@ function killSnake(room, snake, options = {}) {
         line,
       }),
     );
+    if (isActiveRoundPhase) {
+      snake.socket.send(JSON.stringify({ type: 'spectating', reason: 'round' }));
+    }
   }
   broadcastKillFeed(room, {
     type: 'killFeed',
