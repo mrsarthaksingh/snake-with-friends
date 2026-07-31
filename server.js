@@ -6,7 +6,12 @@ const path = require('path');
 const os = require('os');
 const { WebSocketServer } = require('ws');
 const match = require('./match');
-const { segmentCountForScore } = require('./snake-growth');
+const {
+  segmentCountForScore,
+  radiusForScore,
+  MIN_RADIUS,
+  MAX_SNAKE_SEGMENTS,
+} = require('./snake-growth');
 const { SKINS, SKIN_COLORS, resolveSkin, getSkinById } = require('./public/skins');
 
 const PORT = Number(process.env.PORT || process.env.SNAKE_PORT) || 3848;
@@ -32,8 +37,6 @@ const SEGMENT_SPACING = 9;
 const BASE_SPEED = 9.0;
 const BOOST_MULTIPLIER = 2.2;
 const SPEED_POWER_MULTIPLIER = 2.1;
-const MIN_RADIUS = 7;
-const MAX_RADIUS = 28;
 const TURN_RATE = 0.32;
 const BOOST_DROP_CHANCE = 0.35;
 const SPEED_POWER_MS = 8000;
@@ -41,8 +44,8 @@ const SHIELD_POWER_MS = 6000;
 const MAGNET_POWER_MS = 10000;
 const MAGNET_PULL_RADIUS = 200;
 const MAGNET_PULL_SPEED = 14;
-/** Cap wire size, but stay high enough that thinned paths still span full body length. */
-const MAX_SEGMENTS_SEND = 220;
+/** Cap wire size; keep at least as high as max body beads so late-game length is faithful. */
+const MAX_SEGMENTS_SEND = MAX_SNAKE_SEGMENTS;
 const MAX_BOTS = 4;
 
 const BOT_NAMES = Object.freeze([
@@ -291,10 +294,6 @@ function seedFood(room) {
       pickFoodKind(room),
     );
   }
-}
-
-function radiusForScore(score) {
-  return Math.min(MAX_RADIUS, MIN_RADIUS + Math.sqrt(score) * 0.55);
 }
 
 function radiusForSnake(snake) {
