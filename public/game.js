@@ -1265,17 +1265,33 @@ function sendInputThrottled() {
   }
 }
 
-joinForm.addEventListener('submit', (event) => {
-  event.preventDefault();
+function submitJoinForm(event) {
+  if (event) {
+    event.preventDefault();
+  }
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    statusLine.textContent = 'Still connecting… try again in a second.';
+    connect();
+    return false;
+  }
   playerName = nameInput.value.trim();
+  if (!playerName) {
+    statusLine.textContent = 'Enter a name to play.';
+    nameInput.focus();
+    return false;
+  }
   const payload = getJoinPayload();
   if (payload.roomId.length < 3) {
     statusLine.textContent = 'Room code needs at least 3 letters or numbers.';
-    return;
+    return false;
   }
   currentRoomId = payload.roomId;
+  statusLine.textContent = 'Joining arena…';
   send({ type: 'join', ...payload });
-});
+  return false;
+}
+
+joinForm.addEventListener('submit', submitJoinForm);
 
 respawnButton.addEventListener('click', () => {
   if (respawnButton.disabled) {

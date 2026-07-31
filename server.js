@@ -1275,7 +1275,12 @@ function handleMessage(socket, raw) {
 }
 
 function serveStatic(request, response) {
-  let requestPath = request.url === '/' ? '/index.html' : (request.url ?? '/').split('?')[0];
+  // Query strings like /?name=Sarthak must still serve the lobby.
+  // Only exact `url === '/'` used to rewrite — that missed `/?...` and 404'd.
+  let requestPath = (request.url ?? '/').split('?')[0] || '/';
+  if (requestPath === '/') {
+    requestPath = '/index.html';
+  }
   // Browsers auto-request these; map them to our SVG mark.
   if (
     requestPath === '/favicon.ico' ||
@@ -1284,7 +1289,14 @@ function serveStatic(request, response) {
   ) {
     requestPath = '/favicon.svg';
   }
-  const safePath = path.normalize(requestPath).replace(/^(\.\.[/\\])+/, '');
+  // Strip leading slash so path.join doesn't ignore PUBLIC_DIR on POSIX.
+  const relativePath = requestPath.replace(/^[/\\]+/, '');
+  const safePath = path.normalize(relativePath).replace(/^(\.\.[/\\])+/, '');
+  if (safePath === '..' || safePath.startsWith(`..${path.sep}`)) {
+    response.writeHead(403);
+    response.end('Forbidden');
+    return;
+  }
   const filePath = path.join(PUBLIC_DIR, safePath);
   if (!filePath.startsWith(PUBLIC_DIR)) {
     response.writeHead(403);

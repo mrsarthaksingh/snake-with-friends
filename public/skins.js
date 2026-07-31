@@ -91,6 +91,7 @@ const api = Object.freeze({
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = api;
-} else if (typeof globalThis !== 'undefined') {
+}
+if (typeof globalThis !== 'undefined') {
   globalThis.SnakeSkins = api;
 }
