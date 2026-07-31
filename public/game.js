@@ -38,28 +38,8 @@ const spectateNote = document.getElementById('spectateNote');
 
 const FOOD_DRAW_RADIUS = 1500;
 
-const SNAKE_SKINS = Object.freeze([
-  { name: 'Viper Green', color: '#2ecc71' },
-  { name: 'Crimson Coil', color: '#e74c3c' },
-  { name: 'Ocean Fang', color: '#3498db' },
-  { name: 'Solar Ember', color: '#f39c12' },
-  { name: 'Purple Mist', color: '#9b59b6' },
-  { name: 'Mint Strike', color: '#1abc9c' },
-  { name: 'Lava Trail', color: '#e67e22' },
-  { name: 'Pink Pulse', color: '#ff6b9d' },
-  { name: 'Aqua Dash', color: '#00cec9' },
-  { name: 'Rose Rush', color: '#fd79a8' },
-  { name: 'Lilac Bolt', color: '#a29bfe' },
-  { name: 'Jade Glow', color: '#55efc4' },
-  { name: 'Gold Spark', color: '#ffeaa7' },
-  { name: 'Sky Blade', color: '#74b9ff' },
-  { name: 'Ruby Dash', color: '#ff7675' },
-  { name: 'Ice Stream', color: '#81ecec' },
-  { name: 'Sand Storm', color: '#fab1a0' },
-  { name: 'Night Violet', color: '#6c5ce7' },
-  { name: 'Forest Run', color: '#00b894' },
-  { name: 'Silver Scale', color: '#dfe6e9' },
-]);
+const SNAKE_SKINS = (globalThis.SnakeSkins && globalThis.SnakeSkins.SKINS) || [];
+const SKIN_BY_ID = (globalThis.SnakeSkins && globalThis.SnakeSkins.SKIN_BY_ID) || {};
 
 /** @type {WebSocket | null} */
 let socket = null;
@@ -70,7 +50,7 @@ let playerName = '';
 /** @type {string} */
 let currentRoomId = 'LOBBY';
 /** @type {string} */
-let selectedColor = SNAKE_SKINS[0].color;
+let selectedSkinId = SNAKE_SKINS[0] ? SNAKE_SKINS[0].id : 'viper_green';
 /** @type {object | null} */
 let latestState = null;
 let stateTime = 0;
@@ -139,25 +119,42 @@ function easeOutCubic(value) {
   return 1 - (1 - t) ** 3;
 }
 
+function getSelectedSkin() {
+  return SKIN_BY_ID[selectedSkinId] || SNAKE_SKINS[0] || {
+    id: 'viper_green',
+    name: 'Viper Green',
+    color: '#2ecc71',
+    style: 'solid',
+    premium: false,
+  };
+}
+
+function skinPreviewBackground(skin) {
+  if (skin.accent) {
+    return `linear-gradient(135deg, ${skin.color} 35%, ${skin.accent} 100%)`;
+  }
+  return skin.color;
+}
+
 function renderSnakePicker() {
   snakePicker.innerHTML = '';
   SNAKE_SKINS.forEach((skin) => {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = `skin-option${skin.color === selectedColor ? ' selected' : ''}`;
-    button.style.background = skin.color;
-    button.title = skin.name;
+    button.className = `skin-option${skin.id === selectedSkinId ? ' selected' : ''}${skin.premium ? ' premium' : ''}`;
+    button.style.background = skinPreviewBackground(skin);
+    button.title = skin.premium ? `${skin.name} · Free premium` : skin.name;
     button.setAttribute('role', 'option');
-    button.setAttribute('aria-selected', skin.color === selectedColor ? 'true' : 'false');
+    button.setAttribute('aria-selected', skin.id === selectedSkinId ? 'true' : 'false');
     button.addEventListener('click', () => {
-      selectedColor = skin.color;
-      skinNameEl.textContent = skin.name;
+      selectedSkinId = skin.id;
+      skinNameEl.textContent = skin.premium ? `★ ${skin.name} · Free` : skin.name;
       renderSnakePicker();
     });
     snakePicker.appendChild(button);
   });
-  const selected = SNAKE_SKINS.find((skin) => skin.color === selectedColor);
-  skinNameEl.textContent = selected ? selected.name : 'Custom snake';
+  const selected = getSelectedSkin();
+  skinNameEl.textContent = selected.premium ? `★ ${selected.name} · Free` : selected.name;
 }
 
 function normalizeRoomId(raw) {
@@ -188,9 +185,11 @@ function updateRoomPill(roomId) {
 function getJoinPayload() {
   const roomFromInput = roomInput ? normalizeRoomId(roomInput.value) : '';
   const roomId = roomFromInput.length >= 3 ? roomFromInput : currentRoomId || 'LOBBY';
+  const skin = getSelectedSkin();
   return {
     name: playerName || nameInput.value.trim(),
-    color: selectedColor,
+    color: skin.color,
+    skinId: skin.id,
     roomId,
   };
 }
@@ -1075,12 +1074,39 @@ function isSnakeNearViewport(snake, camera, zoom) {
   return false;
 }
 
+function resolveDrawSkin(snake) {
+  const fromId = snake.skinId ? SKIN_BY_ID[snake.skinId] : null;
+  if (fromId) {
+    return fromId;
+  }
+  return {
+    id: 'custom',
+    name: 'Custom',
+    color: snake.color || '#2ecc71',
+    accent: null,
+    style: 'solid',
+    premium: false,
+  };
+}
+
+function beadColorForSkin(skin, index, isHead) {
+  const accent = skin.accent || skin.color;
+  if (skin.style === 'stripe') {
+    return index % 2 === 0 ? skin.color : accent;
+  }
+  if (skin.style === 'dual') {
+    return isHead ? accent : skin.color;
+  }
+  return skin.color;
+}
+
 function drawSnake(snake, camera, zoom) {
   if (!snake.alive || snake.segments.length === 0) {
     return;
   }
   const radius = Math.max(4, snake.radius * zoom);
   const isSelf = snake.id === playerId;
+  const skin = resolveDrawSkin(snake);
   const head = worldToScreen(snake.segments[0], camera, zoom);
   // Long snakes can kill with a body that crosses the screen while the head is off-camera —
   // do not cull by head alone.
@@ -1091,7 +1117,7 @@ function drawSnake(snake, camera, zoom) {
   // Spine stroke fills any residual gaps so thick snakes stay continuous.
   if (snake.segments.length > 1) {
     ctx.beginPath();
-    ctx.strokeStyle = snake.color;
+    ctx.strokeStyle = skin.color;
     ctx.lineWidth = Math.max(2, radius * 1.72);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -1107,15 +1133,28 @@ function drawSnake(snake, camera, zoom) {
     const point = worldToScreen(snake.segments[index], camera, zoom);
     const isHead = index === 0;
     const beadRadius = isHead ? radius * 1.22 : radius * 0.98;
+    const fill = beadColorForSkin(skin, index, isHead);
+    if (skin.style === 'glow') {
+      ctx.beginPath();
+      ctx.fillStyle = `${skin.accent || fill}55`;
+      ctx.arc(point.x, point.y, beadRadius * 1.45, 0, Math.PI * 2);
+      ctx.fill();
+    }
     if (isSelf && isHead) {
       ctx.beginPath();
-      ctx.fillStyle = `${snake.color}44`;
+      ctx.fillStyle = `${fill}44`;
       ctx.arc(point.x, point.y, beadRadius * 1.35, 0, Math.PI * 2);
       ctx.fill();
     }
+    if (skin.style === 'ring') {
+      ctx.beginPath();
+      ctx.fillStyle = skin.accent || '#ffffff';
+      ctx.arc(point.x, point.y, beadRadius * 1.12, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.beginPath();
-    ctx.fillStyle = snake.color;
-    ctx.arc(point.x, point.y, beadRadius, 0, Math.PI * 2);
+    ctx.fillStyle = fill;
+    ctx.arc(point.x, point.y, skin.style === 'ring' ? beadRadius * 0.82 : beadRadius, 0, Math.PI * 2);
     ctx.fill();
     if (!isHead) {
       ctx.beginPath();

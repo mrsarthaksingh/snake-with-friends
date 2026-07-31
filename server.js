@@ -6,6 +6,7 @@ const path = require('path');
 const os = require('os');
 const { WebSocketServer } = require('ws');
 const match = require('./match');
+const { SKINS, SKIN_COLORS, resolveSkin, getSkinById } = require('./public/skins');
 
 const PORT = Number(process.env.PORT || process.env.SNAKE_PORT) || 3848;
 const DEFAULT_ROOM_ID = 'LOBBY';
@@ -83,12 +84,7 @@ const POWER_ORB_TYPES = Object.freeze({
   mega: { color: '#ff4d6d', radius: 11, label: 'Mega' },
 });
 
-const COLORS = Object.freeze([
-  '#2ecc71', '#e74c3c', '#3498db', '#f39c12', '#9b59b6',
-  '#1abc9c', '#e67e22', '#ff6b9d', '#00cec9', '#fd79a8',
-  '#a29bfe', '#55efc4', '#ffeaa7', '#74b9ff', '#ff7675',
-  '#81ecec', '#fab1a0', '#6c5ce7', '#00b894', '#dfe6e9',
-]);
+const COLORS = SKIN_COLORS;
 
 const MIME_TYPES = Object.freeze({
   '.html': 'text/html; charset=utf-8',
@@ -104,6 +100,7 @@ const MIME_TYPES = Object.freeze({
  *   id: string,
  *   name: string,
  *   color: string,
+ *   skinId: string,
  *   angle: number,
  *   targetAngle: number,
  *   boosting: boolean,
@@ -308,17 +305,17 @@ function speedForSnake(snake) {
   return snake.boosting && snake.score > 8 ? base * BOOST_MULTIPLIER : base;
 }
 
-function allocateColor(room) {
-  const used = new Set([...room.snakes.values()].map((snake) => snake.color));
-  const free = COLORS.find((color) => !used.has(color));
-  return free ?? COLORS[room.snakes.size % COLORS.length];
+function allocateSkin(room) {
+  const used = new Set([...room.snakes.values()].map((snake) => snake.skinId));
+  const free = SKINS.find((skin) => !used.has(skin.id));
+  return free ?? SKINS[room.snakes.size % SKINS.length];
 }
 
-function resolveSnakeColor(room, requestedColor) {
-  if (typeof requestedColor === 'string' && COLORS.includes(requestedColor)) {
-    return requestedColor;
+function resolveSnakeSkin(room, requestedSkinId, requestedColor) {
+  if (getSkinById(requestedSkinId) || (typeof requestedColor === 'string' && COLORS.includes(requestedColor))) {
+    return resolveSkin(requestedSkinId, requestedColor);
   }
-  return allocateColor(room);
+  return allocateSkin(room);
 }
 
 function createSnake(room, socket, name, requestedColor, options = {}) {
@@ -335,10 +332,12 @@ function createSnake(room, socket, name, requestedColor, options = {}) {
       y: spawn.y - Math.sin(angle) * index * SEGMENT_SPACING,
     });
   }
+  const skin = resolveSnakeSkin(room, options.skinId, requestedColor);
   return {
     id: crypto.randomUUID(),
     name,
-    color: resolveSnakeColor(room, requestedColor),
+    color: skin.color,
+    skinId: skin.id,
     angle,
     targetAngle: angle,
     boosting: false,
@@ -551,13 +550,20 @@ function spawnBot(room) {
   if (room.snakes.size >= MAX_PLAYERS) {
     return;
   }
-  const bot = createSnake(room, { readyState: 3 }, pickBotName(room), null, { isBot: true });
+  const skin = SKINS[Math.floor(Math.random() * SKINS.length)];
+  const bot = createSnake(room, { readyState: 3 }, pickBotName(room), skin.color, {
+    isBot: true,
+    skinId: skin.id,
+  });
   bot.botRespawnAt = 0;
   room.snakes.set(bot.id, bot);
 }
 
 function respawnBot(room, snake) {
-  const fresh = createSnake(room, { readyState: 3 }, snake.name, snake.color, { isBot: true });
+  const fresh = createSnake(room, { readyState: 3 }, snake.name, snake.color, {
+    isBot: true,
+    skinId: snake.skinId,
+  });
   room.snakes.delete(snake.id);
   room.snakes.set(fresh.id, fresh);
 }
@@ -933,6 +939,7 @@ function buildSharedWireState(room) {
       id: snake.id,
       name: snake.name,
       color: snake.color,
+      skinId: snake.skinId,
       score: Math.floor(snake.score),
       radius: Math.round(radiusForSnake(snake) * 10) / 10,
       angle: Math.round(snake.angle * 1000) / 1000,
@@ -1099,7 +1106,9 @@ function handleJoin(socket, payload) {
   }
   const rawName = typeof payload.name === 'string' ? payload.name.trim() : '';
   const name = rawName.slice(0, 14) || `Snake ${countHumans(room) + 1}`;
-  const snake = createSnake(room, socket, name, payload.color);
+  const snake = createSnake(room, socket, name, payload.color, {
+    skinId: typeof payload.skinId === 'string' ? payload.skinId : undefined,
+  });
   const isRoundActive =
     room.match.phase === 'playing' ||
     room.match.phase === 'countdown' ||
@@ -1116,6 +1125,7 @@ function handleJoin(socket, payload) {
     playerId: snake.id,
     name: snake.name,
     color: snake.color,
+    skinId: snake.skinId,
     roomId: room.id,
     mapSize: MAP_SIZE,
   }));
@@ -1314,7 +1324,7 @@ webSocketServer.on('connection', (socket) => {
     botCount: countBots(defaultRoom),
     defaultRoomId: DEFAULT_ROOM_ID,
     mapSize: MAP_SIZE,
-    skins: COLORS,
+    skins: SKINS,
     tickRate: TICK_RATE,
     netRate: NET_RATE,
     baseSpeed: BASE_SPEED,

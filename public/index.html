@@ -14,7 +14,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Manrope:wght@500;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=13" />
+    <link rel="stylesheet" href="/styles.css?v=14" />
+    <script src="/skins.js?v=1"></script>
   </head>
   <body>
     <canvas id="game"></canvas>
@@ -73,7 +74,7 @@
           <label for="nameInput">Your name</label>
           <input id="nameInput" maxlength="14" placeholder="e.g. Sarthak" autocomplete="nickname" inputmode="text" required />
 
-          <p class="picker-label">Choose your snake</p>
+          <p class="picker-label">Choose your snake <span class="premium-hint">★ premium skins are free</span></p>
           <div class="snake-picker" id="snakePicker" role="listbox" aria-label="Snake skins"></div>
           <p class="skin-name" id="skinName">Viper Green</p>
 
@@ -108,6 +109,6 @@
     </div>
     <div class="kill-feed" id="killFeed" aria-live="polite"></div>
 
-    <script src="/game.js?v=26"></script>
+    <script src="/game.js?v=27"></script>
   </body>
 </html>
