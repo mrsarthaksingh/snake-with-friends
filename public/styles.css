@@ -992,47 +992,54 @@ button:hover {
     display: none;
   }
 
+  /* Hint sat on BOOST + kill feed — button is enough on phones. */
   .mobile-hint {
-    display: block;
-    bottom: max(6.5rem, calc(env(safe-area-inset-bottom) + 5.8rem));
-    font-size: 0.75rem;
-    white-space: normal;
-    text-align: center;
-    max-width: min(240px, 70vw);
+    display: none !important;
   }
 
   .boost-btn {
     display: grid;
     place-items: center;
+    width: 78px;
+    height: 78px;
+    z-index: 30;
+    bottom: max(1rem, calc(env(safe-area-inset-bottom) + 0.75rem));
+    left: max(0.85rem, env(safe-area-inset-left));
   }
 
   .leaderboard {
     min-width: 0;
-    max-width: min(168px, 44vw);
-    padding: 0.55rem 0.65rem;
+    max-width: min(148px, 40vw);
+    padding: 0.45rem 0.55rem;
   }
 
   .leaderboard h3 {
-    font-size: 0.65rem;
+    font-size: 0.62rem;
   }
 
   .leaderboard li {
-    font-size: 0.75rem;
+    font-size: 0.7rem;
   }
 
   .meta {
-    max-width: min(210px, 52vw);
-    gap: 0.3rem;
+    max-width: min(188px, 48vw);
+    gap: 0.28rem;
   }
 
   .pill {
-    padding: 0.35rem 0.55rem;
-    font-size: 0.72rem;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.68rem;
+  }
+
+  .mute-btn {
+    padding: 0.3rem 0.55rem;
+    font-size: 0.68rem;
   }
 
   .start-round-btn {
-    padding: 0.35rem 0.7rem;
-    font-size: 0.72rem;
+    padding: 0.4rem 0.75rem;
+    font-size: 0.74rem;
+    min-height: 36px;
   }
 
   .spectate-note {
@@ -1041,7 +1048,11 @@ button:hover {
   }
 
   #eventBannerText {
-    font-size: clamp(1.1rem, 5vw, 1.55rem);
+    font-size: clamp(0.95rem, 4.2vw, 1.25rem);
+  }
+
+  .event-banner {
+    padding: 0.55rem 0.75rem;
   }
 
   #podiumList li {
@@ -1050,25 +1061,41 @@ button:hover {
   }
 
   #radar {
-    width: 96px;
-    height: 96px;
+    width: 88px;
+    height: 88px;
   }
 
   .radar-wrap {
-    bottom: max(6.8rem, calc(env(safe-area-inset-bottom) + 6.2rem));
+    bottom: max(1rem, calc(env(safe-area-inset-bottom) + 0.75rem));
     right: max(0.65rem, env(safe-area-inset-right));
-    padding: 0.35rem;
+    padding: 0.3rem;
   }
 
+  /* Feed under leaderboard — never over BOOST. */
   .kill-feed {
-    left: max(0.65rem, env(safe-area-inset-left));
-    bottom: max(7.2rem, calc(env(safe-area-inset-bottom) + 6.6rem));
-    max-width: min(260px, calc(100vw - 7.5rem));
+    top: max(7.2rem, calc(env(safe-area-inset-top) + 6.5rem));
+    bottom: auto;
+    left: max(0.55rem, env(safe-area-inset-left));
+    max-width: min(168px, 42vw);
+    gap: 0.22rem;
+  }
+
+  .kill-feed-item {
+    padding: 0.32rem 0.45rem;
+    font-size: 0.65rem;
+    border-radius: 9px;
+    line-height: 1.25;
   }
 
   .death-announce {
-    top: max(18%, calc(env(safe-area-inset-top) + 4.5rem));
-    max-width: min(420px, calc(100vw - 1.5rem));
+    top: max(0.65rem, calc(env(safe-area-inset-top) + 0.35rem));
+    max-width: min(320px, calc(100vw - 1.25rem));
+    padding: 0.45rem 0.7rem;
+    border-radius: 12px;
+  }
+
+  .death-announce-line {
+    font-size: 0.78rem;
   }
 
   .snake-picker {
