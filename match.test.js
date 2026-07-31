@@ -42,7 +42,7 @@ describe('match', () => {
     assert.equal(state.arenaInsetRatio, match.SHRINK_INSET_RATIO);
   });
 
-  it('ranks podium by score then kills', () => {
+  it('ranks podium by score then join order, ignoring kills', () => {
     const state = match.createMatchState();
     state.phase = 'podium';
     state.participantIds = ['a', 'b', 'c'];
@@ -53,16 +53,18 @@ describe('match', () => {
       ['c', { id: 'c', name: 'C', score: 50, isBot: false }],
     ]);
     const podium = match.buildPodium(state, snakes);
-    assert.equal(podium[0].id, 'b');
-    assert.equal(podium[1].id, 'a');
+    assert.equal(podium[0].id, 'a');
+    assert.equal(podium[1].id, 'b');
     assert.equal(podium[2].id, 'c');
+    assert.equal(podium[0].kills, 1);
+    assert.equal(podium[1].kills, 5);
   });
 
   it('ranks podium ties by participant join order', () => {
     const state = match.createMatchState();
     state.phase = 'podium';
     state.participantIds = ['a', 'b'];
-    state.killsByPlayerId = { a: 3, b: 3 };
+    state.killsByPlayerId = { a: 0, b: 9 };
     const snakes = new Map([
       ['a', { id: 'a', name: 'Zebra', score: 50 }],
       ['b', { id: 'b', name: 'Alpha', score: 50 }],
@@ -70,6 +72,7 @@ describe('match', () => {
     const podium = match.buildPodium(state, snakes);
     assert.equal(podium[0].id, 'a');
     assert.equal(podium[1].id, 'b');
+    assert.equal(podium[1].kills, 9);
   });
 
   it('arenaBounds applies inset', () => {

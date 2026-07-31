@@ -129,7 +129,7 @@ const MIME_TYPES = Object.freeze({
  *   snakes: Map<string, Snake>,
  *   foods: Food[],
  *   tickCount: number,
- *   cachedLeaderboard: Array<{ id: string, name: string, score: number, color: string, isBot: boolean }>,
+ *   cachedLeaderboard: Array<{ id: string, name: string, score: number, kills: number, color: string, isBot: boolean }>,
  *   foodIdCounter: number,
  *   lastActiveAt: number,
  *   match: ReturnType<typeof match.createMatchState>,
@@ -907,10 +907,12 @@ function buildLeaderboard(room) {
       id: snake.id,
       name: snake.name,
       score: Math.floor(snake.score),
+      kills: Math.max(0, Math.floor(snake.kills || 0)),
       color: snake.color,
       // Never mark bots on the wire — they should look like regular players.
       isBot: false,
     }))
+    // Rank by score only — kills are display-only and never reorder the board.
     .sort((a, b) => b.score - a.score)
     .slice(0, 10);
 }

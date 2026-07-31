@@ -112,6 +112,20 @@ body {
   font-weight: 700;
 }
 
+.leaderboard .lb-stats {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.leaderboard .lb-kills {
+  font-size: 0.72em;
+  font-weight: 600;
+  color: var(--muted);
+}
+
 .leaderboard li .name {
   display: inline-flex;
   align-items: center;

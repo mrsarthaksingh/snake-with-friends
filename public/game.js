@@ -739,9 +739,10 @@ function renderLeaderboard(state) {
     .slice(0, limit)
     .map((entry, index) => {
       const isYou = entry.id === playerId;
+      const kills = Math.max(0, Math.floor(entry.kills || 0));
       return `<li class="${isYou ? 'you' : ''}">
         <span class="name"><span class="dot" style="background:${entry.color}"></span>${index + 1}. ${escapeHtml(entry.name)}</span>
-        <span>${entry.score}</span>
+        <span class="lb-stats"><span class="lb-score">${entry.score}</span><span class="lb-kills">${kills}k</span></span>
       </li>`;
     })
     .join('');

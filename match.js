@@ -164,9 +164,7 @@ function buildPodium(match, snakesById) {
       if (right.score !== left.score) {
         return right.score - left.score;
       }
-      if (right.kills !== left.kills) {
-        return right.kills - left.kills;
-      }
+      // Kills are shown on the podium but never change place order.
       return match.participantIds.indexOf(left.id) - match.participantIds.indexOf(right.id);
     })
     .slice(0, 10)
