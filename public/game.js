@@ -457,7 +457,23 @@ function updateMatchUi(matchState, players) {
       }
     } else {
       podiumOverlay.hidden = true;
+      // After podium (or mid-round spectate), freeroam waiting must offer Play again.
+      if (
+        matchState.phase === 'waiting' &&
+        joined &&
+        self &&
+        !self.alive &&
+        deathOverlay.hidden
+      ) {
+        deathTitle.textContent = 'Back to freeroam';
+        deathLine.textContent = 'Round ended — drop back in whenever you want.';
+        deathScore.textContent = `Score ${Math.floor(self.score || 0)}`;
+        deathOverlay.hidden = false;
+      }
     }
+  }
+  if (spectateNote) {
+    spectateNote.hidden = !(isSpectating && matchState.phase !== 'waiting');
   }
   if (isSpectating && matchState.phase !== 'waiting') {
     respawnButton.disabled = true;
