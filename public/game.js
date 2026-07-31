@@ -109,9 +109,19 @@ function desiredBeadCount(player) {
 let boostHeldByButton = false;
 let boostHeldByPointer = false;
 let lastSelfScore = 0;
+let localKillCount = 0;
 let wasBoosting = false;
 let lastMatchPhase = '';
 let lastEventBannerName = '';
+
+function setKillsPill(count) {
+  if (!killsPill) {
+    return;
+  }
+  const safe = Math.max(0, Math.floor(Number(count) || 0));
+  localKillCount = Math.max(localKillCount, safe);
+  killsPill.textContent = `Kills ${localKillCount}`;
+}
 
 function playSfx(soundId) {
   if (globalThis.SnakeSfx && typeof globalThis.SnakeSfx.play === 'function') {
@@ -621,8 +631,10 @@ function handleMessage(message) {
       smoothZoom = 0.85;
       renderBodyById.clear();
       lastSelfScore = 0;
+      localKillCount = 0;
       lastMatchPhase = '';
       lastEventBannerName = '';
+      setKillsPill(0);
       if (globalThis.SnakeSfx) {
         globalThis.SnakeSfx.unlock();
       }
@@ -643,8 +655,8 @@ function handleMessage(message) {
         lastSelfScore = 0;
       }
       scorePill.textContent = `Score ${self && self.alive ? self.score : 0}`;
-      if (killsPill) {
-        killsPill.textContent = `Kills ${self ? Math.max(0, Math.floor(self.kills || 0)) : 0}`;
+      if (self && typeof self.kills === 'number') {
+        setKillsPill(self.kills);
       }
       playersPill.textContent = formatPlayersPill(latestState);
       if (stateTime - lastHudUpdate > 250) {
@@ -686,19 +698,27 @@ function handleMessage(message) {
         spectateNote.hidden = false;
       }
       break;
-    case 'killFeed':
-      if (
+    case 'killFeed': {
+      const isMyKill =
         message.cause === 'snake' &&
-        typeof message.killerName === 'string' &&
-        message.killerName === playerName
-      ) {
+        (
+          (typeof message.killerId === 'string' && message.killerId === playerId) ||
+          (typeof message.killerName === 'string' && message.killerName === playerName)
+        );
+      if (isMyKill) {
         playSfx('kill');
+        if (typeof message.killerKills === 'number') {
+          setKillsPill(message.killerKills);
+        } else {
+          setKillsPill(localKillCount + 1);
+        }
       }
       if (message.cause === 'event' && /orb rain/i.test(String(message.line || ''))) {
         playSfx('orb_rain');
       }
       showFunnyDeath(message.line);
       break;
+    }
     case 'error':
       statusLine.textContent = message.message;
       break;
