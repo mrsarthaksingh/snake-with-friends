@@ -96,9 +96,29 @@ let speedPowerMultiplier = 2.1;
 let radarFrame = 0;
 /** @type {Map<string, { headX: number, headY: number, angle: number, beads: { x: number, y: number }[] }>} */
 const renderBodyById = new Map();
-const BEAD_SPACING = 8.5;
-/** Keep in sync with server desiredCount = floor(score). */
-const MAX_RENDER_BEADS = 400;
+/** Must match server `SEGMENT_SPACING` — used to recover true body length from score. */
+const SERVER_SEGMENT_SPACING = 9;
+/** Cap render beads so huge snakes stay smooth without melting the CPU. */
+const MAX_RENDER_BEADS = 700;
+
+/**
+ * Bead centers must stay closer than 2× radius or the body looks like gappy dots
+ * when the snake thickens. Target ~55% diameter overlap.
+ */
+function spacingForSnake(player) {
+  const radius = Math.max(6, Number(player.radius) || 7);
+  return Math.max(3.2, radius * 0.45);
+}
+
+function desiredBeadCount(player) {
+  const scoreParts = Math.max(
+    1,
+    Math.floor(Number.isFinite(player.score) ? player.score : (player.segments?.length || 1)),
+  );
+  const bodyLength = Math.max(SERVER_SEGMENT_SPACING, (scoreParts - 1) * SERVER_SEGMENT_SPACING);
+  const spacing = spacingForSnake(player);
+  return Math.max(1, Math.min(MAX_RENDER_BEADS, Math.floor(bodyLength / spacing) + 1));
+}
 let boostHeldByButton = false;
 let boostHeldByPointer = false;
 let activePointerId = null;
@@ -626,11 +646,6 @@ function resamplePolyline(points, count) {
   return result;
 }
 
-function desiredBeadCount(player) {
-  const fromScore = Number.isFinite(player.score) ? Math.floor(player.score) : 0;
-  return Math.max(1, Math.min(MAX_RENDER_BEADS, Math.max(player.segments.length, fromScore)));
-}
-
 /**
  * Local snake: smooth head follow (stable camera).
  * Remote snakes: densify server path so collision body matches what you see.
@@ -650,6 +665,7 @@ function buildRenderState(deltaMs) {
     }
     const targetHead = player.segments[0];
     const desiredCount = desiredBeadCount(player);
+    const beadSpacing = spacingForSnake(player);
     const isSelf = player.id === playerId;
     let body = renderBodyById.get(player.id);
     if (!isSelf) {
@@ -730,8 +746,8 @@ function buildRenderState(deltaMs) {
         dist = 1;
       }
       body.beads[index] = {
-        x: previous.x + (dx / dist) * BEAD_SPACING,
-        y: previous.y + (dy / dist) * BEAD_SPACING,
+        x: previous.x + (dx / dist) * beadSpacing,
+        y: previous.y + (dy / dist) * beadSpacing,
       };
     }
     return {
@@ -1072,6 +1088,21 @@ function drawSnake(snake, camera, zoom) {
     return;
   }
   // Draw beads tail → head so the head sits on top (classic 000000000 look).
+  // Spine stroke fills any residual gaps so thick snakes stay continuous.
+  if (snake.segments.length > 1) {
+    ctx.beginPath();
+    ctx.strokeStyle = snake.color;
+    ctx.lineWidth = Math.max(2, radius * 1.72);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    const first = worldToScreen(snake.segments[snake.segments.length - 1], camera, zoom);
+    ctx.moveTo(first.x, first.y);
+    for (let index = snake.segments.length - 2; index >= 0; index -= 1) {
+      const point = worldToScreen(snake.segments[index], camera, zoom);
+      ctx.lineTo(point.x, point.y);
+    }
+    ctx.stroke();
+  }
   for (let index = snake.segments.length - 1; index >= 0; index -= 1) {
     const point = worldToScreen(snake.segments[index], camera, zoom);
     const isHead = index === 0;
