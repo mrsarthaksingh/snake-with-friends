@@ -379,6 +379,10 @@ function send(payload) {
   socket.send(JSON.stringify(payload));
 }
 
+function isCompactMobileUi() {
+  return window.matchMedia('(max-width: 720px)').matches;
+}
+
 function pushKillFeed(line) {
   if (!line || !killFeed) {
     return;
@@ -387,7 +391,8 @@ function pushKillFeed(line) {
   item.className = 'kill-feed-item';
   item.textContent = line;
   killFeed.prepend(item);
-  while (killFeed.children.length > 8) {
+  const maxItems = isCompactMobileUi() ? 2 : 8;
+  while (killFeed.children.length > maxItems) {
     const oldest = killFeed.lastElementChild;
     if (oldest) {
       killFeed.removeChild(oldest);
@@ -440,7 +445,10 @@ function pumpDeathAnnounce() {
 
 function showFunnyDeath(line) {
   pushKillFeed(line);
-  enqueueDeathAnnounce(line);
+  // Phone: skip the big center toast — it covers the snake. Feed only.
+  if (!isCompactMobileUi()) {
+    enqueueDeathAnnounce(line);
+  }
 }
 
 function formatRemaining(ms) {
@@ -670,7 +678,9 @@ function formatPlayersPill(state) {
 }
 
 function renderLeaderboard(state) {
+  const limit = isCompactMobileUi() ? 3 : 10;
   const rows = state.leaderboard
+    .slice(0, limit)
     .map((entry, index) => {
       const isYou = entry.id === playerId;
       return `<li class="${isYou ? 'you' : ''}">
