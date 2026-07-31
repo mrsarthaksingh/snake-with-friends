@@ -38,6 +38,13 @@ const podiumList = document.getElementById('podiumList');
 const spectateNote = document.getElementById('spectateNote');
 const muteButtonHud = document.getElementById('muteButtonHud');
 const muteButtonLobby = document.getElementById('muteButtonLobby');
+const fullscreenButtonHud = document.getElementById('fullscreenButtonHud');
+const fullscreenButtonLobby = document.getElementById('fullscreenButtonLobby');
+/** @type {{ width: number, height: number }} */
+let viewportSize = {
+  width: Math.max(1, window.innerWidth || 1),
+  height: Math.max(1, window.innerHeight || 1),
+};
 
 const FOOD_DRAW_RADIUS = 1500;
 
@@ -97,13 +104,33 @@ function spacingForSnake(player) {
   return Math.max(3.2, radius * 0.45);
 }
 
+function pathLengthForSegments(segments) {
+  if (!segments || segments.length < 2) {
+    return 0;
+  }
+  let total = 0;
+  for (let index = 1; index < segments.length; index += 1) {
+    total += Math.hypot(
+      segments[index].x - segments[index - 1].x,
+      segments[index].y - segments[index - 1].y,
+    );
+  }
+  return total;
+}
+
 function desiredBeadCount(player) {
+  const spacing = spacingForSnake(player);
+  // Prefer the actual wire path length so a huge score with a capped body
+  // does not invent thousands of phantom beads.
+  const pathLength = pathLengthForSegments(player.segments);
+  if (pathLength > 0) {
+    return Math.max(1, Math.min(MAX_RENDER_BEADS, Math.floor(pathLength / spacing) + 1));
+  }
   const scoreParts = Math.max(
     1,
-    Math.floor(Number.isFinite(player.score) ? player.score : (player.segments?.length || 1)),
+    Math.floor(Number.isFinite(player.score) ? player.score : 1),
   );
   const bodyLength = Math.max(SERVER_SEGMENT_SPACING, (scoreParts - 1) * SERVER_SEGMENT_SPACING);
-  const spacing = spacingForSnake(player);
   return Math.max(1, Math.min(MAX_RENDER_BEADS, Math.floor(bodyLength / spacing) + 1));
 }
 let boostHeldByButton = false;
@@ -271,13 +298,125 @@ function getJoinPayload() {
   };
 }
 
+function readViewportSize() {
+  const visual = window.visualViewport;
+  if (visual && visual.width >= 2 && visual.height >= 2) {
+    return {
+      width: Math.max(1, Math.round(visual.width)),
+      height: Math.max(1, Math.round(visual.height)),
+    };
+  }
+  return {
+    width: Math.max(1, window.innerWidth || 1),
+    height: Math.max(1, window.innerHeight || 1),
+  };
+}
+
 function resize() {
+  viewportSize = readViewportSize();
   const dpr = Math.min(1.5, window.devicePixelRatio || 1);
-  canvas.width = Math.floor(window.innerWidth * dpr);
-  canvas.height = Math.floor(window.innerHeight * dpr);
-  canvas.style.width = `${window.innerWidth}px`;
-  canvas.style.height = `${window.innerHeight}px`;
+  canvas.width = Math.floor(viewportSize.width * dpr);
+  canvas.height = Math.floor(viewportSize.height * dpr);
+  canvas.style.width = `${viewportSize.width}px`;
+  canvas.style.height = `${viewportSize.height}px`;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function isFullscreenActive() {
+  return Boolean(
+    document.fullscreenElement ||
+      document.webkitFullscreenElement ||
+      document.msFullscreenElement,
+  );
+}
+
+function syncFullscreenButtons() {
+  const active = isFullscreenActive();
+  const label = active ? 'Exit' : 'Full';
+  const aria = active ? 'Exit fullscreen' : 'Enter fullscreen';
+  for (const button of [fullscreenButtonHud, fullscreenButtonLobby]) {
+    if (!button) {
+      continue;
+    }
+    button.textContent = label;
+    button.title = aria;
+    button.setAttribute('aria-label', aria);
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    button.classList.toggle('active-full', active);
+  }
+}
+
+async function enterFullscreen() {
+  if (isFullscreenActive()) {
+    return true;
+  }
+  const root = document.documentElement;
+  try {
+    if (typeof root.requestFullscreen === 'function') {
+      await root.requestFullscreen({ navigationUI: 'hide' });
+    } else if (typeof root.webkitRequestFullscreen === 'function') {
+      root.webkitRequestFullscreen();
+    } else if (typeof root.msRequestFullscreen === 'function') {
+      root.msRequestFullscreen();
+    } else {
+      return false;
+    }
+    requestLandscapeLock();
+    resize();
+    syncFullscreenButtons();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function exitFullscreen() {
+  if (!isFullscreenActive()) {
+    return;
+  }
+  try {
+    if (typeof document.exitFullscreen === 'function') {
+      await document.exitFullscreen();
+    } else if (typeof document.webkitExitFullscreen === 'function') {
+      document.webkitExitFullscreen();
+    } else if (typeof document.msExitFullscreen === 'function') {
+      document.msExitFullscreen();
+    }
+  } catch {
+    // Ignore — button state refreshes on fullscreenchange.
+  }
+}
+
+async function toggleFullscreen() {
+  if (isFullscreenActive()) {
+    await exitFullscreen();
+  } else {
+    await enterFullscreen();
+  }
+  syncFullscreenButtons();
+}
+
+function bindFullscreenControls() {
+  const onToggle = () => {
+    void toggleFullscreen();
+  };
+  if (fullscreenButtonHud) {
+    fullscreenButtonHud.addEventListener('click', onToggle);
+  }
+  if (fullscreenButtonLobby) {
+    fullscreenButtonLobby.addEventListener('click', onToggle);
+  }
+  document.addEventListener('fullscreenchange', () => {
+    resize();
+    syncFullscreenButtons();
+    requestLandscapeLock();
+  });
+  document.addEventListener('webkitfullscreenchange', () => {
+    resize();
+    syncFullscreenButtons();
+    requestLandscapeLock();
+  });
+  syncFullscreenButtons();
 }
 
 function connect() {
@@ -421,8 +560,9 @@ function requestLandscapeLock() {
   if (!isPhoneLike) {
     return;
   }
+  // Orientation lock usually only works while fullscreen on mobile browsers.
   orientation.lock('landscape').catch(() => {
-    // Browsers often block this outside fullscreen — rotate gate still guides users.
+    // Rotate gate still guides users when the lock is denied.
   });
 }
 
@@ -929,6 +1069,7 @@ function buildRenderState(deltaMs) {
       body.beads.pop();
     }
     body.beads[0] = { x: body.headX, y: body.headY };
+    const bodyClampRadius = Math.max(4, (player.radius || 7) * 0.9);
     for (let index = 1; index < body.beads.length; index += 1) {
       const previous = body.beads[index - 1];
       const current = body.beads[index];
@@ -940,10 +1081,13 @@ function buildRenderState(deltaMs) {
         dy = -Math.sin(body.angle);
         dist = 1;
       }
-      body.beads[index] = {
-        x: previous.x + (dx / dist) * beadSpacing,
-        y: previous.y + (dy / dist) * beadSpacing,
-      };
+      body.beads[index] = clampRenderPointToArena(
+        {
+          x: previous.x + (dx / dist) * beadSpacing,
+          y: previous.y + (dy / dist) * beadSpacing,
+        },
+        bodyClampRadius,
+      );
     }
     return {
       ...player,
@@ -959,16 +1103,28 @@ function buildRenderState(deltaMs) {
   return { ...latestState, players, foods: latestState.foods };
 }
 
+function clampRenderPointToArena(point, radius) {
+  const insetRatio = latestState?.match?.arenaInsetRatio || 0;
+  const inset = insetRatio * mapSize;
+  const edge = 8 + Math.max(0, radius);
+  const min = inset + edge;
+  const max = mapSize - inset - edge;
+  return {
+    x: Math.min(max, Math.max(min, point.x)),
+    y: Math.min(max, Math.max(min, point.y)),
+  };
+}
+
 function worldToScreen(point, camera, zoom) {
   return {
-    x: (point.x - camera.x) * zoom + window.innerWidth / 2,
-    y: (point.y - camera.y) * zoom + window.innerHeight / 2,
+    x: (point.x - camera.x) * zoom + viewportSize.width / 2,
+    y: (point.y - camera.y) * zoom + viewportSize.height / 2,
   };
 }
 
 function drawBackground(camera, zoom) {
-  const width = window.innerWidth;
-  const height = window.innerHeight;
+  const width = viewportSize.width;
+  const height = viewportSize.height;
   ctx.fillStyle = '#050d18';
   ctx.fillRect(0, 0, width, height);
 
@@ -1076,8 +1232,8 @@ function drawRadar(state) {
 }
 
 function drawFood(foods, camera, zoom) {
-  const width = window.innerWidth;
-  const height = window.innerHeight;
+  const width = viewportSize.width;
+  const height = viewportSize.height;
   const drawRadiusSq = FOOD_DRAW_RADIUS * FOOD_DRAW_RADIUS;
   for (const food of foods) {
     const dx = food.x - camera.x;
@@ -1252,8 +1408,8 @@ function drawCuteFace(headX, headY, angle, radius, isBoosting) {
 
 function isSnakeNearViewport(snake, camera, zoom) {
   const margin = 120 + snake.radius * zoom * 2;
-  const maxX = window.innerWidth + margin;
-  const maxY = window.innerHeight + margin;
+  const maxX = viewportSize.width + margin;
+  const maxY = viewportSize.height + margin;
   for (let index = 0; index < snake.segments.length; index += Math.max(1, Math.floor(snake.segments.length / 24))) {
     const point = worldToScreen(snake.segments[index], camera, zoom);
     if (point.x >= -margin && point.y >= -margin && point.x <= maxX && point.y <= maxY) {
@@ -1405,8 +1561,8 @@ function sendInput() {
     angle = keyboardAngle;
   } else {
     const zoom = smoothZoom;
-    const worldX = smoothCamera.x + (pointerX - window.innerWidth / 2) / zoom;
-    const worldY = smoothCamera.y + (pointerY - window.innerHeight / 2) / zoom;
+    const worldX = smoothCamera.x + (pointerX - viewportSize.width / 2) / zoom;
+    const worldY = smoothCamera.y + (pointerY - viewportSize.height / 2) / zoom;
     angle = Math.atan2(worldY - smoothCamera.y, worldX - smoothCamera.x);
   }
   send({ type: 'input', angle, boost: boosting });
@@ -1423,7 +1579,9 @@ function frame(now) {
       // Hard-lock camera to smoothed head — second camera lerp was fighting it.
       smoothCamera.x = self.segments[0].x;
       smoothCamera.y = self.segments[0].y;
-      const targetZoom = Math.max(0.45, Math.min(1.15, 14 / self.radius));
+      // Soft zoom-out — old 14/radius dropped to ~0.45 and made fat snakes look stuck.
+      const safeRadius = Math.max(7, self.radius || 7);
+      const targetZoom = Math.max(0.72, Math.min(1.18, 0.58 + 7.8 / safeRadius));
       smoothZoom = lerp(smoothZoom, targetZoom, zoomFollow);
     } else {
       const targetCamera = { x: mapSize / 2, y: mapSize / 2 };
@@ -1447,7 +1605,7 @@ function frame(now) {
     }
   } else {
     ctx.fillStyle = '#050d18';
-    ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+    ctx.fillRect(0, 0, viewportSize.width, viewportSize.height);
   }
   sendInputThrottled();
   requestAnimationFrame(frame);
@@ -1496,6 +1654,8 @@ function submitJoinForm(event) {
   }
   currentRoomId = payload.roomId;
   statusLine.textContent = 'Joining arena…';
+  // User gesture — best chance to hide browser chrome on phones.
+  void enterFullscreen();
   send({ type: 'join', ...payload });
   return false;
 }
@@ -1669,15 +1829,17 @@ function bindBoostButton() {
 
 bindBoostButton();
 bindMuteButtons();
+bindFullscreenControls();
 bindLandscapePreference();
 
 window.addEventListener('resize', resize);
 if (window.visualViewport) {
   window.visualViewport.addEventListener('resize', resize);
+  window.visualViewport.addEventListener('scroll', resize);
 }
 resize();
-pointerX = window.innerWidth / 2;
-pointerY = window.innerHeight / 2;
+pointerX = viewportSize.width / 2;
+pointerY = viewportSize.height / 2;
 const urlRoom = readRoomFromUrl();
 if (urlRoom.length >= 3 && roomInput) {
   roomInput.value = urlRoom;

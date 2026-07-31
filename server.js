@@ -6,6 +6,13 @@ const path = require('path');
 const os = require('os');
 const { WebSocketServer } = require('ws');
 const match = require('./match');
+const {
+  segmentCountForScore,
+  radiusForScore,
+  baseSpeedForScore,
+  BASE_SPEED,
+  MIN_RADIUS,
+} = require('./snake-growth');
 const { SKINS, SKIN_COLORS, resolveSkin, getSkinById } = require('./public/skins');
 
 const PORT = Number(process.env.PORT || process.env.SNAKE_PORT) || 3848;
@@ -28,11 +35,8 @@ const DEATH_DROP_MAX = 52;
 const DEATH_SPRAY_RADIUS = 68;
 const START_SEGMENTS = 12;
 const SEGMENT_SPACING = 9;
-const BASE_SPEED = 9.0;
 const BOOST_MULTIPLIER = 2.2;
 const SPEED_POWER_MULTIPLIER = 2.1;
-const MIN_RADIUS = 7;
-const MAX_RADIUS = 28;
 const TURN_RATE = 0.32;
 const BOOST_DROP_CHANCE = 0.35;
 const SPEED_POWER_MS = 8000;
@@ -40,8 +44,11 @@ const SHIELD_POWER_MS = 6000;
 const MAGNET_POWER_MS = 10000;
 const MAGNET_PULL_RADIUS = 200;
 const MAGNET_PULL_SPEED = 14;
-/** Cap wire size, but stay high enough that thinned paths still span full body length. */
-const MAX_SEGMENTS_SEND = 220;
+/**
+ * Thin long bodies on the wire. Sending every physics bead (up to 280) at 30 Hz
+ * makes fat snakes stutter / feel stuck on mobile.
+ */
+const MAX_SEGMENTS_SEND = 180;
 const MAX_BOTS = 4;
 
 const BOT_NAMES = Object.freeze([
@@ -292,18 +299,13 @@ function seedFood(room) {
   }
 }
 
-function radiusForScore(score) {
-  return Math.min(MAX_RADIUS, MIN_RADIUS + Math.sqrt(score) * 0.55);
-}
-
 function radiusForSnake(snake) {
   return radiusForScore(snake.score);
 }
 
 function speedForSnake(snake) {
   const now = Date.now();
-  const sizePenalty = Math.min(1.4, snake.score * 0.004);
-  let base = BASE_SPEED - sizePenalty;
+  let base = baseSpeedForScore(snake.score);
   if (now < snake.speedUntil) {
     base *= SPEED_POWER_MULTIPLIER;
   }
@@ -723,8 +725,25 @@ function isInsideArena(point, radius, insetRatio = 0) {
   );
 }
 
-function rebuildSnakeBody(snake, nextHead) {
-  const desiredCount = Math.max(START_SEGMENTS, Math.floor(snake.score));
+/**
+ * Keep body beads inside the red border. Head still dies on wall contact;
+ * without this, long snakes swing their tail into the danger zone.
+ * @param {{ x: number, y: number }} point
+ * @param {number} radius
+ * @param {number} [insetRatio]
+ */
+function clampPointToArena(point, radius, insetRatio = 0) {
+  const bounds = match.arenaBounds(MAP_SIZE, insetRatio);
+  const edge = BORDER_PADDING + Math.max(0, radius);
+  return {
+    x: Math.min(bounds.max - edge, Math.max(bounds.min + edge, point.x)),
+    y: Math.min(bounds.max - edge, Math.max(bounds.min + edge, point.y)),
+  };
+}
+
+function rebuildSnakeBody(snake, nextHead, insetRatio = 0) {
+  const desiredCount = segmentCountForScore(snake.score);
+  const bodyRadius = radiusForSnake(snake) * 0.9;
   if (snake.segments.length === 0) {
     snake.segments = [nextHead];
   } else {
@@ -743,10 +762,14 @@ function rebuildSnakeBody(snake, nextHead) {
       dist = 1;
     }
     const scale = SEGMENT_SPACING / dist;
-    snake.segments[index] = {
-      x: previous.x + dx * scale,
-      y: previous.y + dy * scale,
-    };
+    snake.segments[index] = clampPointToArena(
+      {
+        x: previous.x + dx * scale,
+        y: previous.y + dy * scale,
+      },
+      bodyRadius,
+      insetRatio,
+    );
   }
   while (snake.segments.length > desiredCount) {
     snake.segments.pop();
@@ -765,10 +788,16 @@ function rebuildSnakeBody(snake, nextHead) {
       dy = -Math.sin(snake.angle);
       dist = 1;
     }
-    snake.segments.push({
-      x: last.x + (dx / dist) * SEGMENT_SPACING,
-      y: last.y + (dy / dist) * SEGMENT_SPACING,
-    });
+    snake.segments.push(
+      clampPointToArena(
+        {
+          x: last.x + (dx / dist) * SEGMENT_SPACING,
+          y: last.y + (dy / dist) * SEGMENT_SPACING,
+        },
+        bodyRadius,
+        insetRatio,
+      ),
+    );
   }
 }
 
@@ -781,11 +810,12 @@ function moveSnake(room, snake) {
     y: head.y + Math.sin(snake.angle) * speed,
   };
   const radius = radiusForSnake(snake);
-  if (!isInsideArena(nextHead, radius * 0.7, room.match.arenaInsetRatio)) {
+  // Use near-full radius so fat heads don't visually poke past the border.
+  if (!isInsideArena(nextHead, radius * 0.95, room.match.arenaInsetRatio)) {
     killSnake(room, snake, { cause: 'wall' });
     return;
   }
-  rebuildSnakeBody(snake, nextHead);
+  rebuildSnakeBody(snake, nextHead, room.match.arenaInsetRatio);
   if (snake.boosting && snake.score > 8 && Math.random() < BOOST_DROP_CHANCE) {
     snake.score = Math.max(8, snake.score - 0.08);
     const tail = snake.segments[snake.segments.length - 1];
