@@ -78,7 +78,7 @@
           </ul>
         </details>
 
-        <form id="joinForm" class="join-form" action="/" method="get" onsubmit="return typeof submitJoinForm === 'function' ? submitJoinForm(event) : false;">
+        <form id="joinForm" class="join-form" action="/" method="get" onsubmit="return false;">
           <div class="field-grid">
             <div class="field">
               <label for="roomInput">Room code</label>
@@ -139,6 +139,6 @@
     </div>
     <div class="kill-feed" id="killFeed" aria-live="polite"></div>
 
-    <script src="/game.js?v=30"></script>
+    <script src="/game.js?v=31"></script>
   </body>
 </html>
