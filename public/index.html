@@ -10,11 +10,14 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="theme-color" content="#07111f" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
     <title>Snake With Friends</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Manrope:wght@500;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=13" />
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css?v=16" />
+    <script src="/skins.js?v=2"></script>
   </head>
   <body>
     <canvas id="game"></canvas>
@@ -41,43 +44,71 @@
       <p class="hint mobile-hint">Drag to steer · Hold BOOST</p>
     </div>
 
-    <section class="overlay" id="joinOverlay">
+    <section class="overlay join-overlay" id="joinOverlay">
       <div class="card start-card">
-        <p class="eyebrow">Phone or desktop · Max 20 per room · Share a room code</p>
-        <h1>Snake With Friends</h1>
+        <header class="brand-header">
+          <div class="brand-mark" aria-hidden="true">
+            <span class="brand-bead brand-bead-a"></span>
+            <span class="brand-bead brand-bead-b"></span>
+            <span class="brand-bead brand-bead-c"></span>
+          </div>
+          <div class="brand-copy">
+            <p class="eyebrow">Multiplayer arena</p>
+            <h1>Snake With Friends</h1>
+            <p class="brand-tagline">Same room. Same chaos. One leaderboard.</p>
+          </div>
+        </header>
 
-        <div class="rules">
-          <h3>How to play</h3>
+        <ul class="feature-strip" aria-label="Game highlights">
+          <li>Up to 20 players</li>
+          <li>Phone &amp; desktop</li>
+          <li>Free premium skins</li>
+          <li>Chaos rounds</li>
+        </ul>
+
+        <details class="rules-details">
+          <summary>How to play</summary>
           <ul>
             <li><strong>Phone:</strong> drag to steer · hold <strong>BOOST</strong></li>
             <li><strong>Desktop:</strong> mouse / arrows / WASD · click or Space to boost</li>
             <li>Eat orbs to grow · power orbs: Speed / Shield / Magnet / Mega</li>
             <li>Stay inside the <strong>red border</strong> — hit the wall and you die</li>
             <li>Head hits another snake’s <strong>body</strong> → you die</li>
-            <li>Climb the live leaderboard</li>
+            <li>Climb the live leaderboard · start a timed chaos round with friends</li>
           </ul>
-        </div>
+        </details>
 
-        <form id="joinForm">
-          <label for="roomInput">Room code</label>
-          <input
-            id="roomInput"
-            maxlength="12"
-            placeholder="e.g. DELHI7"
-            autocomplete="off"
-            inputmode="text"
-            spellcheck="false"
-          />
-          <p class="room-hint">Friends use the same code, or open your link with <strong>?room=CODE</strong></p>
+        <form id="joinForm" class="join-form" action="/" method="get" onsubmit="return typeof submitJoinForm === 'function' ? submitJoinForm(event) : false;">
+          <div class="field-grid">
+            <div class="field">
+              <label for="roomInput">Room code</label>
+              <input
+                id="roomInput"
+                name="room"
+                maxlength="12"
+                placeholder="e.g. DELHI7"
+                autocomplete="off"
+                inputmode="text"
+                spellcheck="false"
+              />
+            </div>
+            <div class="field">
+              <label for="nameInput">Your name</label>
+              <input id="nameInput" name="name" maxlength="14" placeholder="e.g. Sarthak" autocomplete="nickname" inputmode="text" required />
+            </div>
+          </div>
+          <p class="room-hint">Friends join with the same code — or share <strong>?room=YOURCODE</strong></p>
 
-          <label for="nameInput">Your name</label>
-          <input id="nameInput" maxlength="14" placeholder="e.g. Sarthak" autocomplete="nickname" inputmode="text" required />
+          <div class="skin-section">
+            <div class="skin-section-head">
+              <p class="picker-label">Choose your snake</p>
+              <span class="premium-hint">★ premium · free</span>
+            </div>
+            <div class="snake-picker" id="snakePicker" role="listbox" aria-label="Snake skins"></div>
+            <p class="skin-name" id="skinName">Viper Green</p>
+          </div>
 
-          <p class="picker-label">Choose your snake</p>
-          <div class="snake-picker" id="snakePicker" role="listbox" aria-label="Snake skins"></div>
-          <p class="skin-name" id="skinName">Viper Green</p>
-
-          <button type="submit">Enter arena</button>
+          <button type="submit" class="enter-btn">Enter arena</button>
         </form>
         <p class="status" id="statusLine">Connecting…</p>
       </div>
@@ -108,6 +139,6 @@
     </div>
     <div class="kill-feed" id="killFeed" aria-live="polite"></div>
 
-    <script src="/game.js?v=26"></script>
+    <script src="/game.js?v=30"></script>
   </body>
 </html>
