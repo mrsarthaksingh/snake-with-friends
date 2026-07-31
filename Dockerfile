@@ -5,7 +5,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-COPY server.js match.js ./
+COPY server.js match.js snake-growth.js ./
 COPY public ./public
 
 ENV NODE_ENV=production

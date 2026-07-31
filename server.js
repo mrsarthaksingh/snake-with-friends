@@ -6,6 +6,7 @@ const path = require('path');
 const os = require('os');
 const { WebSocketServer } = require('ws');
 const match = require('./match');
+const { segmentCountForScore } = require('./snake-growth');
 const { SKINS, SKIN_COLORS, resolveSkin, getSkinById } = require('./public/skins');
 
 const PORT = Number(process.env.PORT || process.env.SNAKE_PORT) || 3848;
@@ -724,7 +725,7 @@ function isInsideArena(point, radius, insetRatio = 0) {
 }
 
 function rebuildSnakeBody(snake, nextHead) {
-  const desiredCount = Math.max(START_SEGMENTS, Math.floor(snake.score));
+  const desiredCount = segmentCountForScore(snake.score);
   if (snake.segments.length === 0) {
     snake.segments = [nextHead];
   } else {

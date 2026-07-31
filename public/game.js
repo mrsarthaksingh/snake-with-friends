@@ -97,13 +97,33 @@ function spacingForSnake(player) {
   return Math.max(3.2, radius * 0.45);
 }
 
+function pathLengthForSegments(segments) {
+  if (!segments || segments.length < 2) {
+    return 0;
+  }
+  let total = 0;
+  for (let index = 1; index < segments.length; index += 1) {
+    total += Math.hypot(
+      segments[index].x - segments[index - 1].x,
+      segments[index].y - segments[index - 1].y,
+    );
+  }
+  return total;
+}
+
 function desiredBeadCount(player) {
+  const spacing = spacingForSnake(player);
+  // Prefer the actual wire path length so a huge score with a capped body
+  // does not invent thousands of phantom beads.
+  const pathLength = pathLengthForSegments(player.segments);
+  if (pathLength > 0) {
+    return Math.max(1, Math.min(MAX_RENDER_BEADS, Math.floor(pathLength / spacing) + 1));
+  }
   const scoreParts = Math.max(
     1,
-    Math.floor(Number.isFinite(player.score) ? player.score : (player.segments?.length || 1)),
+    Math.floor(Number.isFinite(player.score) ? player.score : 1),
   );
   const bodyLength = Math.max(SERVER_SEGMENT_SPACING, (scoreParts - 1) * SERVER_SEGMENT_SPACING);
-  const spacing = spacingForSnake(player);
   return Math.max(1, Math.min(MAX_RENDER_BEADS, Math.floor(bodyLength / spacing) + 1));
 }
 let boostHeldByButton = false;
