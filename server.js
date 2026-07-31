@@ -501,11 +501,14 @@ function killSnake(room, snake, options = {}) {
       snake.socket.send(JSON.stringify({ type: 'spectating', reason: 'round' }));
     }
   }
+  const killer = killerId ? room.snakes.get(killerId) : null;
   broadcastKillFeed(room, {
     type: 'killFeed',
     line,
     cause,
     killerName,
+    killerId,
+    killerKills: killer ? Math.max(0, Math.floor(killer.kills || 0)) : null,
     victimName: snake.name,
   });
   if (snake.isBot) {

@@ -880,8 +880,9 @@ body {
   }
 
   .snake-picker {
-    grid-template-columns: repeat(8, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 0.45rem;
+    max-height: 148px;
   }
 
   .lobby-actions {
@@ -952,14 +953,47 @@ button,
   font-size: 0.72rem;
 }
 
+.snake-picker-shell {
+  position: relative;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.18);
+  padding: 0.45rem 0.45rem 0.2rem;
+}
+
 .snake-picker {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.55rem;
-  max-height: 176px;
-  overflow: auto;
-  padding: 0.15rem 0.1rem 0.35rem;
+  max-height: 132px;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  padding: 0.1rem 0.2rem 0.55rem;
   scrollbar-width: thin;
+  scrollbar-color: rgba(125, 255, 179, 0.55) rgba(255, 255, 255, 0.06);
+}
+
+.snake-picker::-webkit-scrollbar {
+  width: 8px;
+}
+
+.snake-picker::-webkit-scrollbar-thumb {
+  background: rgba(125, 255, 179, 0.45);
+  border-radius: 999px;
+}
+
+.snake-picker::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 999px;
+}
+
+.skin-scroll-hint {
+  margin: 0.15rem 0 0.2rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 .skin-option {

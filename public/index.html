@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=22" />
+    <link rel="stylesheet" href="/styles.css?v=23" />
     <script src="/skins.js?v=2"></script>
     <script src="/vendor/howler.min.js"></script>
     <script src="/sfx.js?v=1"></script>
@@ -121,7 +121,10 @@
                   <p class="picker-label">Choose your snake</p>
                   <span class="premium-hint">★ premium · free</span>
                 </div>
-                <div class="snake-picker" id="snakePicker" role="listbox" aria-label="Snake skins"></div>
+                <div class="snake-picker-shell">
+                  <div class="snake-picker" id="snakePicker" role="listbox" aria-label="Snake skins"></div>
+                  <p class="skin-scroll-hint">Scroll for more skins ↓</p>
+                </div>
                 <p class="skin-name" id="skinName">Viper Green</p>
               </div>
 
@@ -164,6 +167,6 @@
     </div>
     <div class="kill-feed" id="killFeed" aria-live="polite"></div>
 
-    <script src="/game.js?v=38"></script>
+    <script src="/game.js?v=39"></script>
   </body>
 </html>
