@@ -120,12 +120,15 @@ function playSfx(soundId) {
 
 function syncMuteButtons() {
   const isMuted = Boolean(globalThis.SnakeSfx && globalThis.SnakeSfx.isMuted());
-  const label = isMuted ? 'Sound off' : 'Sound on';
+  const label = isMuted ? 'Mute' : 'SFX';
+  const aria = isMuted ? 'Unmute sound' : 'Mute sound';
   for (const button of [muteButtonHud, muteButtonLobby]) {
     if (!button) {
       continue;
     }
     button.textContent = label;
+    button.title = aria;
+    button.setAttribute('aria-label', aria);
     button.setAttribute('aria-pressed', isMuted ? 'true' : 'false');
     button.classList.toggle('muted', isMuted);
   }

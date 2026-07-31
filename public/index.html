@@ -16,7 +16,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=18" />
+    <link rel="stylesheet" href="/styles.css?v=19" />
     <script src="/skins.js?v=2"></script>
     <script src="/vendor/howler.min.js"></script>
     <script src="/sfx.js?v=1"></script>
@@ -35,7 +35,7 @@
         <div class="pill match-timer-pill" id="matchTimerPill" hidden>Round —</div>
         <div class="pill match-event-teaser" id="matchEventTeaser" hidden></div>
         <button type="button" class="start-round-btn" id="startRoundButton" hidden>Start round</button>
-        <button type="button" class="mute-btn" id="muteButtonHud" aria-pressed="false" aria-label="Mute sound">Sound on</button>
+        <button type="button" class="mute-btn" id="muteButtonHud" aria-pressed="false" aria-label="Mute sound">SFX</button>
         <p class="spectate-note" id="spectateNote" hidden>Spectating — next round soon</p>
       </div>
       <div class="radar-wrap">
@@ -114,7 +114,7 @@
           <button type="submit" class="enter-btn">Enter arena</button>
         </form>
         <div class="lobby-audio-row">
-          <button type="button" class="mute-btn" id="muteButtonLobby" aria-pressed="false" aria-label="Mute sound">Sound on</button>
+          <button type="button" class="mute-btn" id="muteButtonLobby" aria-pressed="false" aria-label="Mute sound">SFX</button>
           <span class="lobby-audio-hint">Tap once to enable sound</span>
         </div>
         <p class="status" id="statusLine">Connecting…</p>
@@ -146,6 +146,6 @@
     </div>
     <div class="kill-feed" id="killFeed" aria-live="polite"></div>
 
-    <script src="/game.js?v=34"></script>
+    <script src="/game.js?v=35"></script>
   </body>
 </html>
