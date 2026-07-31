@@ -10,19 +10,28 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="theme-color" content="#07111f" />
+    <meta name="screen-orientation" content="landscape" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/favicon.svg" />
     <title>Snake With Friends</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=19" />
+    <link rel="stylesheet" href="/styles.css?v=20" />
     <script src="/skins.js?v=2"></script>
     <script src="/vendor/howler.min.js"></script>
     <script src="/sfx.js?v=1"></script>
   </head>
   <body>
     <canvas id="game"></canvas>
+
+    <div class="rotate-gate" id="rotateGate" role="dialog" aria-live="polite" aria-label="Rotate phone to landscape">
+      <div class="rotate-gate-card">
+        <p class="rotate-gate-icon" aria-hidden="true">↻</p>
+        <h2>Rotate your phone</h2>
+        <p>Snake With Friends plays in <strong>landscape</strong> on mobile.</p>
+      </div>
+    </div>
 
     <div class="hud" id="hud" hidden>
       <div class="leaderboard" id="leaderboard"></div>
@@ -72,7 +81,7 @@
         <details class="rules-details">
           <summary>How to play</summary>
           <ul>
-            <li><strong>Phone:</strong> drag to steer · hold <strong>BOOST</strong></li>
+            <li><strong>Phone:</strong> play in <strong>landscape</strong> · drag to steer · hold <strong>BOOST</strong></li>
             <li><strong>Desktop:</strong> mouse / arrows / WASD · click or Space to boost</li>
             <li>Eat orbs to grow · power orbs: Speed / Shield / Magnet / Mega</li>
             <li>Stay inside the <strong>red border</strong> — hit the wall and you die</li>
@@ -146,6 +155,6 @@
     </div>
     <div class="kill-feed" id="killFeed" aria-live="polite"></div>
 
-    <script src="/game.js?v=35"></script>
+    <script src="/game.js?v=36"></script>
   </body>
 </html>

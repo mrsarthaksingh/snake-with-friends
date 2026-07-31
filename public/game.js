@@ -150,6 +150,19 @@ function bindMuteButtons() {
   }
   syncMuteButtons();
 }
+
+function bindLandscapePreference() {
+  const tryLock = () => {
+    requestLandscapeLock();
+  };
+  window.addEventListener('pointerdown', tryLock, { passive: true });
+  window.addEventListener('orientationchange', () => {
+    window.setTimeout(resize, 120);
+  });
+  if (joinForm) {
+    joinForm.addEventListener('submit', tryLock);
+  }
+}
 let activePointerId = null;
 
 function syncBoosting() {
@@ -383,7 +396,23 @@ function send(payload) {
 }
 
 function isCompactMobileUi() {
-  return window.matchMedia('(max-width: 720px)').matches;
+  return window.matchMedia('(max-width: 920px) and (orientation: landscape)').matches
+    || window.matchMedia('(max-height: 500px) and (orientation: landscape)').matches
+    || window.matchMedia('(max-width: 720px)').matches;
+}
+
+function requestLandscapeLock() {
+  const orientation = window.screen && window.screen.orientation;
+  if (!orientation || typeof orientation.lock !== 'function') {
+    return;
+  }
+  const isPhoneLike = window.matchMedia('(max-width: 920px), (max-height: 500px)').matches;
+  if (!isPhoneLike) {
+    return;
+  }
+  orientation.lock('landscape').catch(() => {
+    // Browsers often block this outside fullscreen — rotate gate still guides users.
+  });
 }
 
 function pushKillFeed(line) {
@@ -1616,6 +1645,7 @@ function bindBoostButton() {
 
 bindBoostButton();
 bindMuteButtons();
+bindLandscapePreference();
 
 window.addEventListener('resize', resize);
 if (window.visualViewport) {
