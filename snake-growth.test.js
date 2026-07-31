@@ -37,4 +37,18 @@ describe('snake growth', () => {
     assert.ok(late < growth.MAX_RADIUS);
     assert.ok(growth.radiusForScore(100_000) > late);
   });
+
+  it('keeps big farmed snakes nearly as fast as mid-size ones', () => {
+    const mid = growth.baseSpeedForScore(160);
+    const hugeScore = growth.baseSpeedForScore(10_316);
+    assert.ok(hugeScore >= mid - 0.35);
+    assert.ok(hugeScore >= growth.BASE_SPEED - 0.8);
+  });
+
+  it('keeps camera zoom high enough that big snakes do not look stuck', () => {
+    const fat = growth.cameraZoomForRadius(30);
+    const starter = growth.cameraZoomForRadius(7);
+    assert.ok(starter > fat);
+    assert.ok(fat >= 0.72);
+  });
 });

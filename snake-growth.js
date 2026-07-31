@@ -15,6 +15,10 @@ const MIN_RADIUS = 7;
 const MAX_RADIUS = 30;
 /** Higher = thickness keeps growing longer into a farm session. */
 const RADIUS_GROWTH_HALF_SCORE = 420;
+const BASE_SPEED = 9.0;
+/** Max world-speed loss from size — keep big snakes feeling mobile. */
+const MAX_SIZE_SPEED_PENALTY = 0.75;
+const SIZE_SPEED_PENALTY_PER_SEGMENT = 0.0028;
 
 /**
  * Map score → segment count.
@@ -43,12 +47,40 @@ function radiusForScore(score) {
   return MIN_RADIUS + (MAX_RADIUS - MIN_RADIUS) * progress;
 }
 
+/**
+ * World speed from score. Uses body length (not raw farm score) so a 10k
+ * leaderboard snake does not feel glued in place.
+ * @param {number} score
+ * @returns {number}
+ */
+function baseSpeedForScore(score) {
+  const bodySize = segmentCountForScore(score);
+  const sizePenalty = Math.min(
+    MAX_SIZE_SPEED_PENALTY,
+    Math.max(0, bodySize - START_SEGMENTS) * SIZE_SPEED_PENALTY_PER_SEGMENT,
+  );
+  return BASE_SPEED - sizePenalty;
+}
+
+/**
+ * Camera zoom that stays readable without making big snakes look stuck.
+ * @param {number} radius
+ * @returns {number}
+ */
+function cameraZoomForRadius(radius) {
+  const safeRadius = Math.max(MIN_RADIUS, Number(radius) || MIN_RADIUS);
+  return Math.max(0.72, Math.min(1.18, 0.58 + 7.8 / safeRadius));
+}
+
 module.exports = {
   START_SEGMENTS,
   LINEAR_LENGTH_UNTIL,
   MAX_SNAKE_SEGMENTS,
   MIN_RADIUS,
   MAX_RADIUS,
+  BASE_SPEED,
   segmentCountForScore,
   radiusForScore,
+  baseSpeedForScore,
+  cameraZoomForRadius,
 };

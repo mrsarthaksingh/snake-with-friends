@@ -1069,6 +1069,7 @@ function buildRenderState(deltaMs) {
       body.beads.pop();
     }
     body.beads[0] = { x: body.headX, y: body.headY };
+    const bodyClampRadius = Math.max(4, (player.radius || 7) * 0.9);
     for (let index = 1; index < body.beads.length; index += 1) {
       const previous = body.beads[index - 1];
       const current = body.beads[index];
@@ -1080,10 +1081,13 @@ function buildRenderState(deltaMs) {
         dy = -Math.sin(body.angle);
         dist = 1;
       }
-      body.beads[index] = {
-        x: previous.x + (dx / dist) * beadSpacing,
-        y: previous.y + (dy / dist) * beadSpacing,
-      };
+      body.beads[index] = clampRenderPointToArena(
+        {
+          x: previous.x + (dx / dist) * beadSpacing,
+          y: previous.y + (dy / dist) * beadSpacing,
+        },
+        bodyClampRadius,
+      );
     }
     return {
       ...player,
@@ -1097,6 +1101,18 @@ function buildRenderState(deltaMs) {
     }
   }
   return { ...latestState, players, foods: latestState.foods };
+}
+
+function clampRenderPointToArena(point, radius) {
+  const insetRatio = latestState?.match?.arenaInsetRatio || 0;
+  const inset = insetRatio * mapSize;
+  const edge = 8 + Math.max(0, radius);
+  const min = inset + edge;
+  const max = mapSize - inset - edge;
+  return {
+    x: Math.min(max, Math.max(min, point.x)),
+    y: Math.min(max, Math.max(min, point.y)),
+  };
 }
 
 function worldToScreen(point, camera, zoom) {
@@ -1563,7 +1579,9 @@ function frame(now) {
       // Hard-lock camera to smoothed head — second camera lerp was fighting it.
       smoothCamera.x = self.segments[0].x;
       smoothCamera.y = self.segments[0].y;
-      const targetZoom = Math.max(0.45, Math.min(1.15, 14 / self.radius));
+      // Soft zoom-out — old 14/radius dropped to ~0.45 and made fat snakes look stuck.
+      const safeRadius = Math.max(7, self.radius || 7);
+      const targetZoom = Math.max(0.72, Math.min(1.18, 0.58 + 7.8 / safeRadius));
       smoothZoom = lerp(smoothZoom, targetZoom, zoomFollow);
     } else {
       const targetCamera = { x: mapSize / 2, y: mapSize / 2 };
