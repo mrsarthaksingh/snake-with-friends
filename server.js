@@ -90,6 +90,7 @@ const MIME_TYPES = Object.freeze({
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
+  '.svg': 'image/svg+xml',
 });
 
 /**
@@ -1274,7 +1275,15 @@ function handleMessage(socket, raw) {
 }
 
 function serveStatic(request, response) {
-  const requestPath = request.url === '/' ? '/index.html' : (request.url ?? '/').split('?')[0];
+  let requestPath = request.url === '/' ? '/index.html' : (request.url ?? '/').split('?')[0];
+  // Browsers auto-request these; map them to our SVG mark.
+  if (
+    requestPath === '/favicon.ico' ||
+    requestPath === '/apple-touch-icon.png' ||
+    requestPath === '/apple-touch-icon-precomposed.png'
+  ) {
+    requestPath = '/favicon.svg';
+  }
   const safePath = path.normalize(requestPath).replace(/^(\.\.[/\\])+/, '');
   const filePath = path.join(PUBLIC_DIR, safePath);
   if (!filePath.startsWith(PUBLIC_DIR)) {
