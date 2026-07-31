@@ -43,6 +43,10 @@ const SKIN_BY_ID = (globalThis.SnakeSkins && globalThis.SnakeSkins.SKIN_BY_ID) |
 
 /** @type {WebSocket | null} */
 let socket = null;
+/** Bumps whenever a new socket is created so stale close/open handlers are ignored. */
+let socketGeneration = 0;
+/** @type {ReturnType<typeof setTimeout> | null} */
+let reconnectTimer = null;
 /** @type {string | null} */
 let playerId = null;
 /** @type {string} */
@@ -204,14 +208,33 @@ function resize() {
 }
 
 function connect() {
+  if (
+    socket &&
+    (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)
+  ) {
+    return;
+  }
+  if (reconnectTimer != null) {
+    window.clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  socket = new WebSocket(`${protocol}://${window.location.host}`);
+  const generation = socketGeneration + 1;
+  socketGeneration = generation;
+  const nextSocket = new WebSocket(`${protocol}://${window.location.host}`);
+  socket = nextSocket;
   statusLine.textContent = 'Connecting…';
-  socket.addEventListener('open', () => {
+  nextSocket.addEventListener('open', () => {
+    if (generation !== socketGeneration || socket !== nextSocket) {
+      return;
+    }
     statusLine.textContent = 'Connected · enter a name to play';
     sendPing();
   });
-  socket.addEventListener('close', () => {
+  nextSocket.addEventListener('close', () => {
+    if (generation !== socketGeneration || socket !== nextSocket) {
+      return;
+    }
     statusLine.textContent = 'Disconnected · retrying…';
     joined = false;
     hud.hidden = true;
@@ -220,9 +243,15 @@ function connect() {
     pingMs = null;
     awaitingPong = false;
     updatePingPill();
-    window.setTimeout(connect, 1000);
+    reconnectTimer = window.setTimeout(() => {
+      reconnectTimer = null;
+      connect();
+    }, 1000);
   });
-  socket.addEventListener('message', (event) => {
+  nextSocket.addEventListener('message', (event) => {
+    if (generation !== socketGeneration || socket !== nextSocket) {
+      return;
+    }
     const message = JSON.parse(String(event.data));
     handleMessage(message);
   });
@@ -1265,13 +1294,26 @@ function sendInputThrottled() {
   }
 }
 
+let joinSubmitLockUntil = 0;
+
 function submitJoinForm(event) {
   if (event) {
     event.preventDefault();
   }
+  const now = Date.now();
+  if (now < joinSubmitLockUntil) {
+    return false;
+  }
+  joinSubmitLockUntil = now + 400;
   if (!socket || socket.readyState !== WebSocket.OPEN) {
+    if (
+      !socket ||
+      socket.readyState === WebSocket.CLOSED ||
+      socket.readyState === WebSocket.CLOSING
+    ) {
+      connect();
+    }
     statusLine.textContent = 'Still connecting… try again in a second.';
-    connect();
     return false;
   }
   playerName = nameInput.value.trim();
@@ -1291,6 +1333,7 @@ function submitJoinForm(event) {
   return false;
 }
 
+// HTML onsubmit calls submitJoinForm; keep one JS listener path only as backup.
 joinForm.addEventListener('submit', submitJoinForm);
 
 respawnButton.addEventListener('click', () => {
