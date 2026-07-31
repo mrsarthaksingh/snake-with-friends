@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=27" />
+    <link rel="stylesheet" href="/styles.css?v=28" />
     <script src="/skins.js?v=2"></script>
     <script src="/vendor/howler.min.js"></script>
     <script src="/sfx.js?v=1"></script>
@@ -98,8 +98,36 @@
 
           <div class="lobby-panel">
             <form id="joinForm" class="join-form" action="/" method="get" onsubmit="return false;">
+              <fieldset class="mode-picker" id="modePicker">
+                <legend class="picker-label">Choose mode</legend>
+                <div class="mode-options" role="radiogroup" aria-label="Game mode">
+                  <label class="mode-option">
+                    <input type="radio" name="gameMode" value="single" />
+                    <span class="mode-card">
+                      <strong>Single</strong>
+                      <em>Practice vs bots</em>
+                    </span>
+                  </label>
+                  <label class="mode-option">
+                    <input type="radio" name="gameMode" value="multi" checked />
+                    <span class="mode-card">
+                      <strong>Multiplayer</strong>
+                      <em>Play with friends</em>
+                    </span>
+                  </label>
+                  <label class="mode-option">
+                    <input type="radio" name="gameMode" value="arena" />
+                    <span class="mode-card">
+                      <strong>Arena</strong>
+                      <em>Timed match · friends only · no bots</em>
+                    </span>
+                  </label>
+                </div>
+                <p class="mode-blurb" id="modeBlurb">Share a room code with friends. Bots fill in until 5 humans join.</p>
+              </fieldset>
+
               <div class="field-grid">
-                <div class="field">
+                <div class="field" id="roomField">
                   <label for="roomInput">Room code</label>
                   <input
                     id="roomInput"
@@ -116,7 +144,7 @@
                   <input id="nameInput" name="name" maxlength="14" placeholder="e.g. Sarthak" autocomplete="nickname" inputmode="text" required />
                 </div>
               </div>
-              <p class="room-hint">Friends join with the same code — or share <strong>?room=YOURCODE</strong></p>
+              <p class="room-hint" id="roomHint">Friends join with the same code — or share <strong>?room=YOURCODE&amp;mode=multi</strong></p>
 
               <div class="skin-section">
                 <div class="skin-section-head">
@@ -170,6 +198,6 @@
     </div>
     <div class="kill-feed" id="killFeed" aria-live="polite"></div>
 
-    <script src="/game.js?v=46"></script>
+    <script src="/game.js?v=47"></script>
   </body>
 </html>

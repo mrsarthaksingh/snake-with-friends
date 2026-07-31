@@ -7,6 +7,9 @@ const deathOverlay = document.getElementById('deathOverlay');
 const joinForm = document.getElementById('joinForm');
 const nameInput = document.getElementById('nameInput');
 const roomInput = document.getElementById('roomInput');
+const roomField = document.getElementById('roomField');
+const roomHint = document.getElementById('roomHint');
+const modeBlurb = document.getElementById('modeBlurb');
 const statusLine = document.getElementById('statusLine');
 const hud = document.getElementById('hud');
 const leaderboardEl = document.getElementById('leaderboard');
@@ -269,32 +272,140 @@ function normalizeRoomId(raw) {
     .slice(0, 12);
 }
 
+/** @type {'single' | 'multi' | 'arena'} */
+let selectedGameMode = 'multi';
+
+const MODE_BLURBS = Object.freeze({
+  single: 'Private practice room with a full bot lobby. No friends can join.',
+  multi: 'Share a room code with friends. Bots fill in until 5 humans join.',
+  arena: 'Timed chaos match with friends only. No bots. Need 2 players to start.',
+});
+
+function normalizeGameMode(raw) {
+  const value = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  if (value === 'single' || value === 'solo') {
+    return 'single';
+  }
+  if (value === 'arena' || value === 'match') {
+    return 'arena';
+  }
+  if (value === 'multi' || value === 'multiplayer' || value === 'mp') {
+    return 'multi';
+  }
+  return 'multi';
+}
+
 function readRoomFromUrl() {
   const params = new URLSearchParams(window.location.search);
   return normalizeRoomId(params.get('room'));
 }
 
-function updateShareUrl(roomId) {
+function readModeFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const modeParam = params.get('mode');
+  if (modeParam) {
+    return normalizeGameMode(modeParam);
+  }
+  // Old share links with only ?room= stay Multiplayer.
+  if (params.get('room')) {
+    return 'multi';
+  }
+  return 'multi';
+}
+
+function updateShareUrl(roomId, mode = selectedGameMode) {
   const url = new URL(window.location.href);
-  url.searchParams.set('room', roomId);
+  const safeMode = normalizeGameMode(mode);
+  if (safeMode === 'single') {
+    url.searchParams.delete('room');
+    url.searchParams.set('mode', 'single');
+  } else {
+    url.searchParams.set('room', roomId);
+    url.searchParams.set('mode', safeMode);
+  }
   window.history.replaceState({}, '', url);
 }
 
-function updateRoomPill(roomId) {
-  if (roomPill) {
-    roomPill.textContent = `Room ${roomId}`;
+function updateRoomPill(roomId, mode = selectedGameMode) {
+  if (!roomPill) {
+    return;
+  }
+  if (normalizeGameMode(mode) === 'single') {
+    roomPill.textContent = 'SOLO';
+    return;
+  }
+  roomPill.textContent = `Room ${roomId}`;
+}
+
+function getSelectedGameMode() {
+  const checked = document.querySelector('input[name="gameMode"]:checked');
+  return normalizeGameMode(checked ? checked.value : selectedGameMode);
+}
+
+function syncModeLobbyUi() {
+  selectedGameMode = getSelectedGameMode();
+  const isSingle = selectedGameMode === 'single';
+  if (roomField) {
+    roomField.classList.toggle('room-field-hidden', isSingle);
+  }
+  if (roomInput) {
+    roomInput.disabled = isSingle;
+    roomInput.required = !isSingle;
+  }
+  if (roomHint) {
+    if (isSingle) {
+      roomHint.innerHTML = 'Solo practice — a private room is created for you.';
+    } else if (selectedGameMode === 'arena') {
+      roomHint.innerHTML =
+        'Friends join with the same code — share <strong>?room=YOURCODE&amp;mode=arena</strong>';
+    } else {
+      roomHint.innerHTML =
+        'Friends join with the same code — share <strong>?room=YOURCODE&amp;mode=multi</strong>';
+    }
+  }
+  if (modeBlurb) {
+    modeBlurb.textContent = MODE_BLURBS[selectedGameMode] || MODE_BLURBS.multi;
   }
 }
 
+function bindModePicker() {
+  const inputs = document.querySelectorAll('input[name="gameMode"]');
+  for (const input of inputs) {
+    input.addEventListener('change', () => {
+      syncModeLobbyUi();
+    });
+  }
+  syncModeLobbyUi();
+}
+
+function setSelectedGameMode(mode) {
+  const safe = normalizeGameMode(mode);
+  const input = document.querySelector(`input[name="gameMode"][value="${safe}"]`);
+  if (input) {
+    input.checked = true;
+  }
+  selectedGameMode = safe;
+  syncModeLobbyUi();
+}
+
 function getJoinPayload() {
+  const mode = getSelectedGameMode();
   const roomFromInput = roomInput ? normalizeRoomId(roomInput.value) : '';
-  const roomId = roomFromInput.length >= 3 ? roomFromInput : currentRoomId || 'LOBBY';
+  const roomId =
+    mode === 'single'
+      ? currentRoomId || 'SOLO'
+      : roomFromInput.length >= 3
+        ? roomFromInput
+        : currentRoomId || 'LOBBY';
   const skin = getSelectedSkin();
   return {
     name: playerName || nameInput.value.trim(),
     color: skin.color,
     skinId: skin.id,
     roomId,
+    mode,
   };
 }
 
@@ -664,12 +775,17 @@ function updateMatchUi(matchState, players) {
   if (spectateNote) {
     spectateNote.hidden = !isSpectating;
   }
+  const isArenaMode =
+    normalizeGameMode(latestState?.mode || selectedGameMode) === 'arena';
   if (startRoundButton) {
     startRoundButton.hidden = !(
-      matchState.phase === 'waiting' && matchState.humanCount >= 2
+      isArenaMode &&
+      matchState.phase === 'waiting' &&
+      matchState.humanCount >= 2
     );
   }
-  const showTimer = matchState.phase === 'countdown' || matchState.phase === 'playing';
+  const showTimer =
+    isArenaMode && (matchState.phase === 'countdown' || matchState.phase === 'playing');
   if (matchTimerPill) {
     matchTimerPill.hidden = !showTimer;
     if (showTimer) {
@@ -680,7 +796,7 @@ function updateMatchUi(matchState, players) {
     }
   }
   if (matchEventTeaser) {
-    if (matchState.nextEvent && matchState.phase === 'playing') {
+    if (isArenaMode && matchState.nextEvent && matchState.phase === 'playing') {
       matchEventTeaser.hidden = false;
       matchEventTeaser.textContent = `${matchState.nextEvent.name} in ${formatRemaining(matchState.nextEvent.startsInMs)}`;
     } else {
@@ -696,7 +812,7 @@ function updateMatchUi(matchState, players) {
     }
   }
   if (podiumOverlay && podiumList) {
-    if (matchState.phase === 'podium') {
+    if (isArenaMode && matchState.phase === 'podium') {
       podiumOverlay.hidden = false;
       deathOverlay.hidden = true;
       podiumList.innerHTML = '';
@@ -749,19 +865,22 @@ function handleMessage(message) {
         roomInput.value = message.defaultRoomId;
         currentRoomId = message.defaultRoomId;
       }
-      statusLine.textContent = `Connected · pick a room code and enter the arena`;
+      statusLine.textContent = 'Connected · choose a mode and enter';
       break;
     case 'joined':
       playerId = message.playerId;
       playerName = message.name;
       mapSize = message.mapSize;
+      if (typeof message.mode === 'string') {
+        setSelectedGameMode(message.mode);
+      }
       if (typeof message.roomId === 'string') {
         currentRoomId = message.roomId;
-        if (roomInput) {
+        if (roomInput && selectedGameMode !== 'single') {
           roomInput.value = message.roomId;
         }
-        updateShareUrl(message.roomId);
-        updateRoomPill(message.roomId);
+        updateShareUrl(message.roomId, selectedGameMode);
+        updateRoomPill(message.roomId, selectedGameMode);
       }
       joined = true;
       joinOverlay.hidden = true;
@@ -1832,6 +1951,7 @@ bindBoostButton();
 bindMuteButtons();
 bindFullscreenControls();
 bindLandscapePreference();
+bindModePicker();
 
 window.addEventListener('resize', resize);
 if (window.visualViewport) {
@@ -1841,11 +1961,13 @@ if (window.visualViewport) {
 resize();
 pointerX = viewportSize.width / 2;
 pointerY = viewportSize.height / 2;
+const urlMode = readModeFromUrl();
+setSelectedGameMode(urlMode);
 const urlRoom = readRoomFromUrl();
-if (urlRoom.length >= 3 && roomInput) {
+if (urlRoom.length >= 3 && roomInput && urlMode !== 'single') {
   roomInput.value = urlRoom;
   currentRoomId = urlRoom;
-  updateRoomPill(urlRoom);
+  updateRoomPill(urlRoom, urlMode);
 }
 renderSnakePicker();
 connect();
