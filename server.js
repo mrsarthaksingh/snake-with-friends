@@ -575,7 +575,11 @@ function maintainBots(room) {
     if (!snake.isBot) {
       continue;
     }
-    if (!snake.alive && snake.botRespawnAt && Date.now() >= snake.botRespawnAt) {
+    if (
+      !snake.alive &&
+      typeof snake.botRespawnAt === 'number' &&
+      Date.now() >= snake.botRespawnAt
+    ) {
       if (countBots(room) <= desired) {
         respawnBot(room, snake);
       } else {
@@ -1024,11 +1028,18 @@ function tickRoom(room) {
     for (const snake of room.snakes.values()) {
       snake.alive = false;
       snake.spectating = true;
+      // Mass podium wipe skipped killSnake(), so bots never got a respawn timer.
+      if (snake.isBot) {
+        snake.botRespawnAt = Date.now() + match.PODIUM_MS;
+      }
     }
   }
   if (tickResult.transitionedTo === 'waiting') {
     for (const snake of room.snakes.values()) {
       if (snake.isBot) {
+        if (!snake.alive) {
+          snake.botRespawnAt = Date.now();
+        }
         continue;
       }
       snake.spectating = false;
@@ -1130,6 +1141,9 @@ function handleJoin(socket, payload) {
     roomId: room.id,
     mapSize: MAP_SIZE,
   }));
+  if (isRoundActive && socket.readyState === 1) {
+    socket.send(JSON.stringify({ type: 'spectating', reason: 'round' }));
+  }
 }
 
 function handleInput(socket, payload) {
