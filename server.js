@@ -6,6 +6,7 @@ const path = require('path');
 const os = require('os');
 const { WebSocketServer } = require('ws');
 const match = require('./match');
+const gameMode = require('./game-mode');
 const {
   segmentCountForScore,
   radiusForScore,
@@ -180,6 +181,7 @@ const MIME_TYPES = Object.freeze({
 /**
  * @typedef {{
  *   id: string,
+ *   mode: import('./game-mode').GameMode | 'single' | 'multi' | 'arena',
  *   snakes: Map<string, Snake>,
  *   foods: Food[],
  *   tickCount: number,
@@ -207,9 +209,14 @@ function normalizeRoomId(raw) {
   return DEFAULT_ROOM_ID;
 }
 
-function createRoom(roomId) {
+/**
+ * @param {string} roomId
+ * @param {string} [mode]
+ */
+function createRoom(roomId, mode = 'multi') {
   return {
     id: roomId,
+    mode: gameMode.normalizeMode(mode, 'multi'),
     snakes: new Map(),
     foods: [],
     tickCount: 0,
@@ -220,14 +227,18 @@ function createRoom(roomId) {
   };
 }
 
-function getOrCreateRoom(rawRoomId) {
+/**
+ * @param {string} rawRoomId
+ * @param {string} [mode]
+ */
+function getOrCreateRoom(rawRoomId, mode = 'multi') {
   const roomId = normalizeRoomId(rawRoomId);
   let room = rooms.get(roomId);
   if (!room) {
-    room = createRoom(roomId);
+    room = createRoom(roomId, mode);
     seedFood(room);
     rooms.set(roomId, room);
-    console.log(`Room opened: ${roomId}`);
+    console.log(`Room opened: ${roomId} (${room.mode})`);
   }
   room.lastActiveAt = Date.now();
   return room;
@@ -573,8 +584,15 @@ function countBots(room) {
   return countBotsInRoom(room);
 }
 
-function desiredBotCount() {
-  return MAX_BOTS;
+/**
+ * @param {Room} room
+ * @returns {number}
+ */
+function desiredBotCount(room) {
+  const mode = gameMode.normalizeMode(room.mode, 'multi');
+  const desired = gameMode.desiredBotCountForMode(mode, countHumans(room));
+  const freeSeats = Math.max(0, MAX_PLAYERS - countHumans(room));
+  return Math.min(desired, freeSeats);
 }
 
 function pickBotName(room) {
@@ -628,7 +646,7 @@ function respawnBot(room, snake) {
 }
 
 function maintainBots(room) {
-  const desired = desiredBotCount();
+  const desired = desiredBotCount(room);
   for (const snake of [...room.snakes.values()]) {
     if (!snake.isBot) {
       continue;
@@ -1064,6 +1082,7 @@ function buildSharedWireState(room) {
   return {
     type: 'state',
     roomId: room.id,
+    mode: gameMode.normalizeMode(room.mode, 'multi'),
     players,
     foods: foodWire,
     leaderboard: room.cachedLeaderboard,
@@ -1197,7 +1216,35 @@ function handleJoin(socket, payload) {
       return;
     }
   }
-  const room = getOrCreateRoom(payload.roomId);
+  const joinMode = gameMode.normalizeMode(payload.mode, 'multi');
+  let requestedRoomId = typeof payload.roomId === 'string' ? payload.roomId : '';
+  if (joinMode === 'single') {
+    const normalized = normalizeRoomId(requestedRoomId);
+    const existingSolo = rooms.get(normalized);
+    // Reuse empty solo room on respawn; otherwise mint a private room.
+    if (
+      existingSolo &&
+      gameMode.normalizeMode(existingSolo.mode, 'multi') === 'single' &&
+      countHumans(existingSolo) === 0
+    ) {
+      requestedRoomId = existingSolo.id;
+    } else {
+      requestedRoomId = gameMode.createPrivateSingleRoomId();
+    }
+  }
+  const room = getOrCreateRoom(requestedRoomId, joinMode);
+  const mismatch = gameMode.modeMismatchMessage(
+    gameMode.normalizeMode(room.mode, 'multi'),
+    joinMode,
+  );
+  if (mismatch) {
+    sendError(socket, mismatch);
+    return;
+  }
+  if (room.mode === 'single' && countHumans(room) >= 1) {
+    sendError(socket, gameMode.singleCapacityMessage());
+    return;
+  }
   if (countHumans(room) >= MAX_PLAYERS) {
     sendError(socket, 'Room full (max 20).');
     return;
@@ -1211,9 +1258,10 @@ function handleJoin(socket, payload) {
     skinId: typeof payload.skinId === 'string' ? payload.skinId : undefined,
   });
   const isRoundActive =
-    room.match.phase === 'playing' ||
-    room.match.phase === 'countdown' ||
-    room.match.phase === 'podium';
+    room.mode === 'arena' &&
+    (room.match.phase === 'playing' ||
+      room.match.phase === 'countdown' ||
+      room.match.phase === 'podium');
   if (isRoundActive) {
     snake.alive = false;
     snake.spectating = true;
@@ -1228,6 +1276,7 @@ function handleJoin(socket, payload) {
     color: snake.color,
     skinId: snake.skinId,
     roomId: room.id,
+    mode: room.mode,
     mapSize: MAP_SIZE,
   }));
   if (isRoundActive && socket.readyState === 1) {
@@ -1284,10 +1333,18 @@ function handleStartRound(socket) {
     sendError(socket, 'Join a room first.');
     return;
   }
+  if (gameMode.normalizeMode(room.mode, 'multi') !== 'arena') {
+    sendError(socket, 'Start round is only available in Arena mode.');
+    return;
+  }
   const humans = [...room.snakes.values()].filter((snake) => !snake.isBot);
-  if (!match.canStartRound(humans.length, room.match.phase)) {
+  if (!gameMode.canStartArena(humans.length) || !match.canStartRound(humans.length, room.match.phase)) {
     sendError(socket, 'Need 2 players in the lobby to start.');
     return;
+  }
+  // Safety: Arena never keeps bots once a match begins.
+  while (countBots(room) > 0) {
+    removeOneBot(room);
   }
   match.beginCountdown(
     room.match,
