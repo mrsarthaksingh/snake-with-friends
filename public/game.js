@@ -35,6 +35,8 @@ const eventBannerText = document.getElementById('eventBannerText');
 const podiumOverlay = document.getElementById('podiumOverlay');
 const podiumList = document.getElementById('podiumList');
 const spectateNote = document.getElementById('spectateNote');
+const muteButtonHud = document.getElementById('muteButtonHud');
+const muteButtonLobby = document.getElementById('muteButtonLobby');
 
 const FOOD_DRAW_RADIUS = 1500;
 
@@ -105,6 +107,46 @@ function desiredBeadCount(player) {
 }
 let boostHeldByButton = false;
 let boostHeldByPointer = false;
+let lastSelfScore = 0;
+let wasBoosting = false;
+let lastMatchPhase = '';
+let lastEventBannerName = '';
+
+function playSfx(soundId) {
+  if (globalThis.SnakeSfx && typeof globalThis.SnakeSfx.play === 'function') {
+    globalThis.SnakeSfx.play(soundId);
+  }
+}
+
+function syncMuteButtons() {
+  const isMuted = Boolean(globalThis.SnakeSfx && globalThis.SnakeSfx.isMuted());
+  const label = isMuted ? 'Sound off' : 'Sound on';
+  for (const button of [muteButtonHud, muteButtonLobby]) {
+    if (!button) {
+      continue;
+    }
+    button.textContent = label;
+    button.setAttribute('aria-pressed', isMuted ? 'true' : 'false');
+    button.classList.toggle('muted', isMuted);
+  }
+}
+
+function bindMuteButtons() {
+  const onToggle = () => {
+    if (globalThis.SnakeSfx && typeof globalThis.SnakeSfx.toggleMuted === 'function') {
+      globalThis.SnakeSfx.unlock();
+      globalThis.SnakeSfx.toggleMuted();
+      syncMuteButtons();
+    }
+  };
+  if (muteButtonHud) {
+    muteButtonHud.addEventListener('click', onToggle);
+  }
+  if (muteButtonLobby) {
+    muteButtonLobby.addEventListener('click', onToggle);
+  }
+  syncMuteButtons();
+}
 let activePointerId = null;
 
 function syncBoosting() {
@@ -112,6 +154,10 @@ function syncBoosting() {
   if (boostButton) {
     boostButton.classList.toggle('active', boosting);
   }
+  if (boosting && !wasBoosting) {
+    playSfx('boost');
+  }
+  wasBoosting = boosting;
 }
 
 function lerp(from, to, amount) {
@@ -411,6 +457,19 @@ function updateMatchUi(matchState, players) {
   const now = Date.now();
   const self = players.find((p) => p.id === playerId);
   const isSpectating = Boolean(self && self.spectating);
+  if (matchState.phase === 'countdown' && lastMatchPhase !== 'countdown') {
+    playSfx('round_start');
+  }
+  lastMatchPhase = matchState.phase;
+  if (matchState.activeBanner && matchState.activeBanner.name) {
+    const bannerName = String(matchState.activeBanner.name);
+    if (bannerName !== lastEventBannerName && /orb rain/i.test(bannerName)) {
+      playSfx('orb_rain');
+    }
+    lastEventBannerName = bannerName;
+  } else {
+    lastEventBannerName = '';
+  }
   if (spectateNote) {
     spectateNote.hidden = !isSpectating;
   }
@@ -520,6 +579,12 @@ function handleMessage(message) {
       smoothCamera = { x: mapSize / 2, y: mapSize / 2 };
       smoothZoom = 0.85;
       renderBodyById.clear();
+      lastSelfScore = 0;
+      lastMatchPhase = '';
+      lastEventBannerName = '';
+      if (globalThis.SnakeSfx) {
+        globalThis.SnakeSfx.unlock();
+      }
       sendPing();
       break;
     case 'state': {
@@ -527,6 +592,15 @@ function handleMessage(message) {
       stateTime = performance.now();
       updateMatchUi(message.match, message.players);
       const self = getSelfSnake(latestState);
+      if (self && self.alive) {
+        const nextScore = Number(self.score) || 0;
+        if (nextScore > lastSelfScore && lastSelfScore > 0) {
+          playSfx('eat');
+        }
+        lastSelfScore = nextScore;
+      } else if (self && !self.alive) {
+        lastSelfScore = 0;
+      }
       scorePill.textContent = `Score ${self && self.alive ? self.score : 0}`;
       playersPill.textContent = formatPlayersPill(latestState);
       if (stateTime - lastHudUpdate > 250) {
@@ -552,6 +626,7 @@ function handleMessage(message) {
       awaitingPong = false;
       break;
     case 'died':
+      playSfx('death');
       deathTitle.textContent = message.cause === 'wall' ? 'Border said no' : 'Got cooked';
       deathLine.textContent = message.line || 'Oof.';
       deathScore.textContent = `Score ${message.score}`;
@@ -568,6 +643,16 @@ function handleMessage(message) {
       }
       break;
     case 'killFeed':
+      if (
+        message.cause === 'snake' &&
+        typeof message.killerName === 'string' &&
+        message.killerName === playerName
+      ) {
+        playSfx('kill');
+      }
+      if (message.cause === 'event' && /orb rain/i.test(String(message.line || ''))) {
+        playSfx('orb_rain');
+      }
       showFunnyDeath(message.line);
       break;
     case 'error':
@@ -1517,6 +1602,7 @@ function bindBoostButton() {
 }
 
 bindBoostButton();
+bindMuteButtons();
 
 window.addEventListener('resize', resize);
 if (window.visualViewport) {
