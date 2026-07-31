@@ -38,6 +38,13 @@ const podiumList = document.getElementById('podiumList');
 const spectateNote = document.getElementById('spectateNote');
 const muteButtonHud = document.getElementById('muteButtonHud');
 const muteButtonLobby = document.getElementById('muteButtonLobby');
+const fullscreenButtonHud = document.getElementById('fullscreenButtonHud');
+const fullscreenButtonLobby = document.getElementById('fullscreenButtonLobby');
+/** @type {{ width: number, height: number }} */
+let viewportSize = {
+  width: Math.max(1, window.innerWidth || 1),
+  height: Math.max(1, window.innerHeight || 1),
+};
 
 const FOOD_DRAW_RADIUS = 1500;
 
@@ -291,13 +298,125 @@ function getJoinPayload() {
   };
 }
 
+function readViewportSize() {
+  const visual = window.visualViewport;
+  if (visual && visual.width >= 2 && visual.height >= 2) {
+    return {
+      width: Math.max(1, Math.round(visual.width)),
+      height: Math.max(1, Math.round(visual.height)),
+    };
+  }
+  return {
+    width: Math.max(1, window.innerWidth || 1),
+    height: Math.max(1, window.innerHeight || 1),
+  };
+}
+
 function resize() {
+  viewportSize = readViewportSize();
   const dpr = Math.min(1.5, window.devicePixelRatio || 1);
-  canvas.width = Math.floor(window.innerWidth * dpr);
-  canvas.height = Math.floor(window.innerHeight * dpr);
-  canvas.style.width = `${window.innerWidth}px`;
-  canvas.style.height = `${window.innerHeight}px`;
+  canvas.width = Math.floor(viewportSize.width * dpr);
+  canvas.height = Math.floor(viewportSize.height * dpr);
+  canvas.style.width = `${viewportSize.width}px`;
+  canvas.style.height = `${viewportSize.height}px`;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function isFullscreenActive() {
+  return Boolean(
+    document.fullscreenElement ||
+      document.webkitFullscreenElement ||
+      document.msFullscreenElement,
+  );
+}
+
+function syncFullscreenButtons() {
+  const active = isFullscreenActive();
+  const label = active ? 'Exit' : 'Full';
+  const aria = active ? 'Exit fullscreen' : 'Enter fullscreen';
+  for (const button of [fullscreenButtonHud, fullscreenButtonLobby]) {
+    if (!button) {
+      continue;
+    }
+    button.textContent = label;
+    button.title = aria;
+    button.setAttribute('aria-label', aria);
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    button.classList.toggle('active-full', active);
+  }
+}
+
+async function enterFullscreen() {
+  if (isFullscreenActive()) {
+    return true;
+  }
+  const root = document.documentElement;
+  try {
+    if (typeof root.requestFullscreen === 'function') {
+      await root.requestFullscreen({ navigationUI: 'hide' });
+    } else if (typeof root.webkitRequestFullscreen === 'function') {
+      root.webkitRequestFullscreen();
+    } else if (typeof root.msRequestFullscreen === 'function') {
+      root.msRequestFullscreen();
+    } else {
+      return false;
+    }
+    requestLandscapeLock();
+    resize();
+    syncFullscreenButtons();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function exitFullscreen() {
+  if (!isFullscreenActive()) {
+    return;
+  }
+  try {
+    if (typeof document.exitFullscreen === 'function') {
+      await document.exitFullscreen();
+    } else if (typeof document.webkitExitFullscreen === 'function') {
+      document.webkitExitFullscreen();
+    } else if (typeof document.msExitFullscreen === 'function') {
+      document.msExitFullscreen();
+    }
+  } catch {
+    // Ignore — button state refreshes on fullscreenchange.
+  }
+}
+
+async function toggleFullscreen() {
+  if (isFullscreenActive()) {
+    await exitFullscreen();
+  } else {
+    await enterFullscreen();
+  }
+  syncFullscreenButtons();
+}
+
+function bindFullscreenControls() {
+  const onToggle = () => {
+    void toggleFullscreen();
+  };
+  if (fullscreenButtonHud) {
+    fullscreenButtonHud.addEventListener('click', onToggle);
+  }
+  if (fullscreenButtonLobby) {
+    fullscreenButtonLobby.addEventListener('click', onToggle);
+  }
+  document.addEventListener('fullscreenchange', () => {
+    resize();
+    syncFullscreenButtons();
+    requestLandscapeLock();
+  });
+  document.addEventListener('webkitfullscreenchange', () => {
+    resize();
+    syncFullscreenButtons();
+    requestLandscapeLock();
+  });
+  syncFullscreenButtons();
 }
 
 function connect() {
@@ -441,8 +560,9 @@ function requestLandscapeLock() {
   if (!isPhoneLike) {
     return;
   }
+  // Orientation lock usually only works while fullscreen on mobile browsers.
   orientation.lock('landscape').catch(() => {
-    // Browsers often block this outside fullscreen — rotate gate still guides users.
+    // Rotate gate still guides users when the lock is denied.
   });
 }
 
@@ -981,14 +1101,14 @@ function buildRenderState(deltaMs) {
 
 function worldToScreen(point, camera, zoom) {
   return {
-    x: (point.x - camera.x) * zoom + window.innerWidth / 2,
-    y: (point.y - camera.y) * zoom + window.innerHeight / 2,
+    x: (point.x - camera.x) * zoom + viewportSize.width / 2,
+    y: (point.y - camera.y) * zoom + viewportSize.height / 2,
   };
 }
 
 function drawBackground(camera, zoom) {
-  const width = window.innerWidth;
-  const height = window.innerHeight;
+  const width = viewportSize.width;
+  const height = viewportSize.height;
   ctx.fillStyle = '#050d18';
   ctx.fillRect(0, 0, width, height);
 
@@ -1096,8 +1216,8 @@ function drawRadar(state) {
 }
 
 function drawFood(foods, camera, zoom) {
-  const width = window.innerWidth;
-  const height = window.innerHeight;
+  const width = viewportSize.width;
+  const height = viewportSize.height;
   const drawRadiusSq = FOOD_DRAW_RADIUS * FOOD_DRAW_RADIUS;
   for (const food of foods) {
     const dx = food.x - camera.x;
@@ -1272,8 +1392,8 @@ function drawCuteFace(headX, headY, angle, radius, isBoosting) {
 
 function isSnakeNearViewport(snake, camera, zoom) {
   const margin = 120 + snake.radius * zoom * 2;
-  const maxX = window.innerWidth + margin;
-  const maxY = window.innerHeight + margin;
+  const maxX = viewportSize.width + margin;
+  const maxY = viewportSize.height + margin;
   for (let index = 0; index < snake.segments.length; index += Math.max(1, Math.floor(snake.segments.length / 24))) {
     const point = worldToScreen(snake.segments[index], camera, zoom);
     if (point.x >= -margin && point.y >= -margin && point.x <= maxX && point.y <= maxY) {
@@ -1425,8 +1545,8 @@ function sendInput() {
     angle = keyboardAngle;
   } else {
     const zoom = smoothZoom;
-    const worldX = smoothCamera.x + (pointerX - window.innerWidth / 2) / zoom;
-    const worldY = smoothCamera.y + (pointerY - window.innerHeight / 2) / zoom;
+    const worldX = smoothCamera.x + (pointerX - viewportSize.width / 2) / zoom;
+    const worldY = smoothCamera.y + (pointerY - viewportSize.height / 2) / zoom;
     angle = Math.atan2(worldY - smoothCamera.y, worldX - smoothCamera.x);
   }
   send({ type: 'input', angle, boost: boosting });
@@ -1467,7 +1587,7 @@ function frame(now) {
     }
   } else {
     ctx.fillStyle = '#050d18';
-    ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+    ctx.fillRect(0, 0, viewportSize.width, viewportSize.height);
   }
   sendInputThrottled();
   requestAnimationFrame(frame);
@@ -1516,6 +1636,8 @@ function submitJoinForm(event) {
   }
   currentRoomId = payload.roomId;
   statusLine.textContent = 'Joining arena…';
+  // User gesture — best chance to hide browser chrome on phones.
+  void enterFullscreen();
   send({ type: 'join', ...payload });
   return false;
 }
@@ -1689,15 +1811,17 @@ function bindBoostButton() {
 
 bindBoostButton();
 bindMuteButtons();
+bindFullscreenControls();
 bindLandscapePreference();
 
 window.addEventListener('resize', resize);
 if (window.visualViewport) {
   window.visualViewport.addEventListener('resize', resize);
+  window.visualViewport.addEventListener('scroll', resize);
 }
 resize();
-pointerX = window.innerWidth / 2;
-pointerY = window.innerHeight / 2;
+pointerX = viewportSize.width / 2;
+pointerY = viewportSize.height / 2;
 const urlRoom = readRoomFromUrl();
 if (urlRoom.length >= 3 && roomInput) {
   roomInput.value = urlRoom;
