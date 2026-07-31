@@ -882,7 +882,7 @@ function renderLeaderboard(state) {
       const kills = Math.max(0, Math.floor(entry.kills || 0));
       return `<li class="${isYou ? 'you' : ''}">
         <span class="name"><span class="dot" style="background:${entry.color}"></span>${index + 1}. ${escapeHtml(entry.name)}</span>
-        <span class="lb-stats"><span class="lb-score">${entry.score}</span><span class="lb-kills">${kills}k</span></span>
+        <span class="lb-stats"><span class="lb-score">${entry.score}</span><span class="lb-kills">${kills} ${kills === 1 ? 'kill' : 'kills'}</span></span>
       </li>`;
     })
     .join('');
