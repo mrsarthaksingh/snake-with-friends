@@ -53,11 +53,56 @@ const MAX_SEGMENTS_SEND = 180;
 const MAX_BOTS = 4;
 
 /**
- * Casual Indian nicknames (mixed gender + chat spellings) so bots blend in
- * with real lobby names instead of looking like a formal name list.
+ * Single-mode bots use English nicknames so practice doesn't "burn" the
+ * Indian multiplayer name pool — friends won't recognize solo-bot names.
  */
-const BOT_NAMES = Object.freeze([
-  // guys
+const BOT_NAMES_SINGLE = Object.freeze([
+  'alex',
+  'jamie',
+  'chris',
+  'sam',
+  'jordan',
+  'taylor',
+  'casey',
+  'morgan',
+  'riley',
+  'quinn',
+  'avery',
+  'blake',
+  'drew',
+  'logan',
+  'cameron',
+  'parker',
+  'reed',
+  'skyler',
+  'finley',
+  'hayden',
+  'noah',
+  'liam',
+  'emma',
+  'olivia',
+  'mia',
+  'sophia',
+  'lucas',
+  'ethan',
+  'nina',
+  'chloe',
+  'alex99',
+  'sam_plays',
+  'jamie_x',
+  'chrisYT',
+  'riley07',
+  'nova',
+  'pixel',
+  'ziggy',
+  'milo',
+  'lunaa',
+]);
+
+/**
+ * Multiplayer bots: casual Indian nicknames so they blend with real friends.
+ */
+const BOT_NAMES_MULTI = Object.freeze([
   'arjun',
   'rohan',
   'Rahul',
@@ -88,7 +133,6 @@ const BOT_NAMES = Object.freeze([
   'om',
   'nikhil',
   'prateek',
-  // girls — informal spellings
   'divyaa',
   'priyaa',
   'ananyaa',
@@ -119,7 +163,6 @@ const BOT_NAMES = Object.freeze([
   'fatima',
   'myra',
   'lakshmi',
-  // chatty lobby-style handles
   'rohan07',
   'arjun_x',
   'divya_22',
@@ -595,13 +638,19 @@ function desiredBotCount(room) {
   return Math.min(desired, freeSeats);
 }
 
+function botNamePoolForRoom(room) {
+  const mode = gameMode.normalizeMode(room.mode, 'multi');
+  return mode === 'single' ? BOT_NAMES_SINGLE : BOT_NAMES_MULTI;
+}
+
 function pickBotName(room) {
+  const pool = botNamePoolForRoom(room);
   const used = new Set([...room.snakes.values()].map((snake) => snake.name));
-  const free = BOT_NAMES.filter((name) => !used.has(name));
+  const free = pool.filter((name) => !used.has(name));
   if (free.length > 0) {
     return free[Math.floor(Math.random() * free.length)];
   }
-  return BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)];
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 function removeOneBot(room) {
