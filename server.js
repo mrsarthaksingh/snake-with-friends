@@ -356,6 +356,7 @@ function createSnake(room, socket, name, requestedColor, options = {}) {
     isBot: Boolean(options.isBot),
     spectating: false,
     roundScoreLocked: false,
+    kills: 0,
     socket,
   };
 }
@@ -469,6 +470,7 @@ function killSnake(room, snake, options = {}) {
     const killer = room.snakes.get(killerId);
     if (killer) {
       killer.score += match.KILL_SCORE_BONUS;
+      killer.kills = (killer.kills || 0) + 1;
       match.recordKill(room.match, killer.id);
     }
   }
@@ -950,6 +952,7 @@ function buildSharedWireState(room) {
       color: snake.color,
       skinId: snake.skinId,
       score: Math.floor(snake.score),
+      kills: Math.max(0, Math.floor(snake.kills || 0)),
       radius: Math.round(radiusForSnake(snake) * 10) / 10,
       angle: Math.round(snake.angle * 1000) / 1000,
       alive: snake.alive,
