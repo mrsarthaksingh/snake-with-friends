@@ -11,6 +11,7 @@ const statusLine = document.getElementById('statusLine');
 const hud = document.getElementById('hud');
 const leaderboardEl = document.getElementById('leaderboard');
 const scorePill = document.getElementById('scorePill');
+const killsPill = document.getElementById('killsPill');
 const roomPill = document.getElementById('roomPill');
 const playersPill = document.getElementById('playersPill');
 const pingPill = document.getElementById('pingPill');
@@ -642,6 +643,9 @@ function handleMessage(message) {
         lastSelfScore = 0;
       }
       scorePill.textContent = `Score ${self && self.alive ? self.score : 0}`;
+      if (killsPill) {
+        killsPill.textContent = `Kills ${self ? Math.max(0, Math.floor(self.kills || 0)) : 0}`;
+      }
       playersPill.textContent = formatPlayersPill(latestState);
       if (stateTime - lastHudUpdate > 250) {
         lastHudUpdate = stateTime;
