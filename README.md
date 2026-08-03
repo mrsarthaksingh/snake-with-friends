@@ -6,21 +6,22 @@ Multiplayer snake for up to **20 players per room**.
 
 - Steer with mouse / touch; hold click or Space to **boost**
 - Eat glowing energy orbs to grow and raise your score
-- Stay inside the **red arena border** — hit the wall and you die
+- Stay inside the **red arena zone** — hit the edge and you die
 - If your **head** hits another snake’s **body**, you die
 - Dead snakes drop food; respawn anytime
 - Live **leaderboard** shows top scores
+- **Quick reactions** — tap emotes or press **1–6** to cheer, taunt, or say GG
 
 ## Chaos rounds
 
-Structured **2:30** matches for friends in the same room:
+Structured **3:00** matches for friends in the same room:
 
 1. **Lobby** — need **2+ human players**; **Start round** appears when the lobby is ready (hidden or rejected with fewer than two).
 2. **Countdown** — 3 seconds, then the round begins.
-3. **Playing** — score by eating orbs and kills (+5 per kill); dead players **spectate** (no mid-round respawn).
+3. **Playing** — circular arena; score by eating orbs and kills (+5 per kill); dead players **spectate** (no mid-round respawn).
 4. **Orb Rain** — at **0:20**, a burst of extra food spawns across the arena.
-5. **Final Shrink** — at **2:00**, the red border moves inward (~12%); wall kills still apply to the new bounds.
-6. **Podium** — after 2:30, top scores are shown for 8 seconds, then everyone returns to the lobby.
+5. **Zone shrink** — the safe circle shrinks over time: **100% → 80%** at 1:00, **60%** at 2:00, **30%** at 2:30. A **green dashed line** previews the next safe zone ~20s before each shrink.
+6. **Podium** — after 3:00, top scores are shown for 8 seconds, then everyone returns to the lobby.
 
 ## Rooms
 

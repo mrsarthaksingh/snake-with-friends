@@ -17,8 +17,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=28" />
-    <script src="/skins.js?v=2"></script>
+    <link rel="stylesheet" href="/styles.css?v=32" />
+    <script src="/skins.js?v=4"></script>
+    <script src="/arena.js?v=1"></script>
+    <script src="/emotes.js?v=1"></script>
     <script src="/vendor/howler.min.js"></script>
     <script src="/sfx.js?v=1"></script>
   </head>
@@ -50,12 +52,17 @@
         <button type="button" class="mute-btn" id="muteButtonHud" aria-pressed="false" aria-label="Mute sound">SFX</button>
         <p class="spectate-note" id="spectateNote" hidden>Spectating — next round soon</p>
       </div>
-      <div class="radar-wrap">
-        <p class="radar-label">Radar</p>
-        <canvas id="radar" width="160" height="160" aria-label="Player radar"></canvas>
-      </div>
+      <aside class="hud-dock" aria-label="Radar and reactions">
+        <div class="radar-wrap">
+          <p class="radar-label">Radar</p>
+          <canvas id="radar" width="160" height="160" aria-label="Player radar"></canvas>
+        </div>
+        <div class="emote-bar" id="emoteBar" role="toolbar" aria-label="Quick reactions" hidden>
+          <!-- Buttons injected by game.js -->
+        </div>
+      </aside>
       <button type="button" class="boost-btn" id="boostButton" aria-label="Hold to boost">BOOST</button>
-      <p class="hint desktop-hint">Mouse / arrows / WASD to steer · Click or Space to boost</p>
+      <p class="hint desktop-hint">Mouse / arrows / WASD to steer · Click or Space to boost · 1–6 for reactions</p>
       <p class="hint mobile-hint">Drag to steer · Hold BOOST</p>
     </div>
 
@@ -89,7 +96,7 @@
                 <li><strong>Phone:</strong> play in <strong>landscape</strong> · drag to steer · hold <strong>BOOST</strong></li>
                 <li><strong>Desktop:</strong> mouse / arrows / WASD · click or Space to boost</li>
                 <li>Eat orbs to grow · power orbs: Speed / Shield / Magnet / Mega</li>
-                <li>Stay inside the <strong>red border</strong> — hit the wall and you die</li>
+                <li>Stay inside the <strong>red zone</strong> — Arena uses a shrinking circle</li>
                 <li>Head hits another snake’s <strong>body</strong> → you die</li>
                 <li>Climb the live leaderboard · start a timed chaos round with friends</li>
               </ul>
@@ -198,6 +205,6 @@
     </div>
     <div class="kill-feed" id="killFeed" aria-live="polite"></div>
 
-    <script src="/game.js?v=47"></script>
+    <script src="/game.js?v=54"></script>
   </body>
 </html>

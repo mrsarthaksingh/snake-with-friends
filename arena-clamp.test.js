@@ -2,37 +2,33 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const match = require('./match');
+const arena = require('./public/arena');
 
 const MAP_SIZE = 5000;
-const BORDER_PADDING = 8;
 
-function clampPointToArena(point, radius, insetRatio = 0) {
-  const bounds = match.arenaBounds(MAP_SIZE, insetRatio);
-  const edge = BORDER_PADDING + Math.max(0, radius);
-  return {
-    x: Math.min(bounds.max - edge, Math.max(bounds.min + edge, point.x)),
-    y: Math.min(bounds.max - edge, Math.max(bounds.min + edge, point.y)),
-  };
-}
-
-describe('arena body clamp', () => {
-  it('pulls body beads that swing past the red border back inside', () => {
-    const radius = 24;
-    const outside = { x: -40, y: MAP_SIZE + 80 };
-    const clamped = clampPointToArena(outside, radius, 0);
-    const edge = BORDER_PADDING + radius;
-    assert.equal(clamped.x, edge);
-    assert.equal(clamped.y, MAP_SIZE - edge);
+describe('arena geometry', () => {
+  it('clamps points outside a circular playable zone inward', () => {
+    const center = arena.arenaCenter(MAP_SIZE);
+    const far = { x: center.x + 5000, y: center.y };
+    const clamped = arena.clampPointToCircle(far, 12, MAP_SIZE, 0.8);
+    const maxR = arena.playableRadius(MAP_SIZE, 0.8) - arena.BORDER_PADDING - 12;
+    const dist = Math.hypot(clamped.x - center.x, clamped.y - center.y);
+    assert.ok(dist <= maxR + 0.01);
   });
 
-  it('respects chaos shrink inset', () => {
-    const radius = 12;
-    const insetRatio = match.SHRINK_INSET_RATIO;
-    const bounds = match.arenaBounds(MAP_SIZE, insetRatio);
-    const clamped = clampPointToArena({ x: 0, y: 0 }, radius, insetRatio);
-    const edge = BORDER_PADDING + radius;
-    assert.equal(clamped.x, bounds.min + edge);
-    assert.equal(clamped.y, bounds.min + edge);
+  it('keeps points inside a circular playable zone unchanged', () => {
+    const center = arena.arenaCenter(MAP_SIZE);
+    const inside = { x: center.x + 40, y: center.y + 20 };
+    const clamped = arena.clampPointToCircle(inside, 8, MAP_SIZE, 1);
+    assert.equal(clamped.x, inside.x);
+    assert.equal(clamped.y, inside.y);
+  });
+
+  it('still supports rectangular freeroam bounds', () => {
+    const outside = { x: -40, y: MAP_SIZE + 80 };
+    const clamped = arena.clampPointToRect(outside, 24, MAP_SIZE, 0);
+    const edge = arena.BORDER_PADDING + 24;
+    assert.equal(clamped.x, edge);
+    assert.equal(clamped.y, MAP_SIZE - edge);
   });
 });

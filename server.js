@@ -7,6 +7,7 @@ const os = require('os');
 const { WebSocketServer } = require('ws');
 const match = require('./match');
 const gameMode = require('./game-mode');
+const arena = require('./public/arena');
 const {
   segmentCountForScore,
   radiusForScore,
@@ -15,6 +16,8 @@ const {
   MIN_RADIUS,
 } = require('./snake-growth');
 const { SKINS, SKIN_COLORS, resolveSkin, getSkinById } = require('./public/skins');
+const emotes = require('./public/emotes');
+const collision = require('./collision');
 
 const PORT = Number(process.env.PORT || process.env.SNAKE_PORT) || 3848;
 const DEFAULT_ROOM_ID = 'LOBBY';
@@ -460,6 +463,7 @@ function createSnake(room, socket, name, requestedColor, options = {}) {
     spectating: false,
     roundScoreLocked: false,
     kills: 0,
+    lastEmoteAt: 0,
     socket,
   };
 }
@@ -826,36 +830,36 @@ function turnToward(current, target, maxTurn) {
   return wrapAngle(current + delta);
 }
 
-const BORDER_PADDING = 8;
+const BORDER_PADDING = arena.BORDER_PADDING;
 
-function isInsideArena(point, radius, insetRatio = 0) {
-  const bounds = match.arenaBounds(MAP_SIZE, insetRatio);
-  const edge = BORDER_PADDING + radius;
-  return (
-    point.x >= bounds.min + edge &&
-    point.y >= bounds.min + edge &&
-    point.x <= bounds.max - edge &&
-    point.y <= bounds.max - edge
-  );
+/**
+ * @param {import('./server').Room} room
+ * @returns {boolean}
+ */
+function usesCircularArena(room) {
+  return gameMode.normalizeMode(room.mode, 'multi') === 'arena';
+}
+
+function isInsideArena(point, radius, room) {
+  if (usesCircularArena(room)) {
+    return arena.isInsideCircle(point, radius, MAP_SIZE, room.match.arenaRadiusRatio);
+  }
+  return arena.isInsideRect(point, radius, MAP_SIZE, 0);
 }
 
 /**
- * Keep body beads inside the red border. Head still dies on wall contact;
- * without this, long snakes swing their tail into the danger zone.
  * @param {{ x: number, y: number }} point
  * @param {number} radius
- * @param {number} [insetRatio]
+ * @param {import('./server').Room} room
  */
-function clampPointToArena(point, radius, insetRatio = 0) {
-  const bounds = match.arenaBounds(MAP_SIZE, insetRatio);
-  const edge = BORDER_PADDING + Math.max(0, radius);
-  return {
-    x: Math.min(bounds.max - edge, Math.max(bounds.min + edge, point.x)),
-    y: Math.min(bounds.max - edge, Math.max(bounds.min + edge, point.y)),
-  };
+function clampPointToArena(point, radius, room) {
+  if (usesCircularArena(room)) {
+    return arena.clampPointToCircle(point, radius, MAP_SIZE, room.match.arenaRadiusRatio);
+  }
+  return arena.clampPointToRect(point, radius, MAP_SIZE, 0);
 }
 
-function rebuildSnakeBody(snake, nextHead, insetRatio = 0) {
+function rebuildSnakeBody(snake, nextHead, room) {
   const desiredCount = segmentCountForScore(snake.score);
   const bodyRadius = radiusForSnake(snake) * 0.9;
   if (snake.segments.length === 0) {
@@ -882,7 +886,7 @@ function rebuildSnakeBody(snake, nextHead, insetRatio = 0) {
         y: previous.y + dy * scale,
       },
       bodyRadius,
-      insetRatio,
+      room,
     );
   }
   while (snake.segments.length > desiredCount) {
@@ -909,27 +913,28 @@ function rebuildSnakeBody(snake, nextHead, insetRatio = 0) {
           y: last.y + (dy / dist) * SEGMENT_SPACING,
         },
         bodyRadius,
-        insetRatio,
+        room,
       ),
     );
   }
 }
 
 function moveSnake(room, snake) {
+  const head = snake.segments[0];
+  snake.prevHead = { x: head.x, y: head.y };
   snake.angle = turnToward(snake.angle, snake.targetAngle, TURN_RATE);
   const speed = speedForSnake(snake);
-  const head = snake.segments[0];
   const nextHead = {
     x: head.x + Math.cos(snake.angle) * speed,
     y: head.y + Math.sin(snake.angle) * speed,
   };
   const radius = radiusForSnake(snake);
   // Use near-full radius so fat heads don't visually poke past the border.
-  if (!isInsideArena(nextHead, radius * 0.95, room.match.arenaInsetRatio)) {
+  if (!isInsideArena(nextHead, radius * 0.95, room)) {
     killSnake(room, snake, { cause: 'wall' });
     return;
   }
-  rebuildSnakeBody(snake, nextHead, room.match.arenaInsetRatio);
+  rebuildSnakeBody(snake, nextHead, room);
   if (snake.boosting && snake.score > 8 && Math.random() < BOOST_DROP_CHANCE) {
     snake.score = Math.max(8, snake.score - 0.08);
     const tail = snake.segments[snake.segments.length - 1];
@@ -1001,22 +1006,53 @@ function collideSnakes(room) {
       continue;
     }
     const head = snake.segments[0];
-    // Use near-core radii so oversized snakes don't create phantom hit bubbles.
+    const prevHead = snake.prevHead ?? null;
     const headRadius = Math.max(MIN_RADIUS * 0.7, radiusForSnake(snake) * 0.55);
     for (const other of alive) {
       if (other.id === snake.id || killerByVictim.has(other.id)) {
         continue;
       }
+      if (now < other.spawnProtectedUntil) {
+        continue;
+      }
       const bodyRadius = Math.max(MIN_RADIUS * 0.65, radiusForSnake(other) * 0.5);
-      // Skip the first few neck segments to reduce head-on false positives.
+      const hitRadius = headRadius + bodyRadius;
+      let hitBody = false;
       for (let index = 4; index < other.segments.length; index += 1) {
         const segment = other.segments[index];
-        if (distance(head, segment) <= headRadius + bodyRadius) {
+        if (collision.headPathHitsPoint(prevHead, head, segment, hitRadius)) {
           killerByVictim.set(snake.id, other.id);
+          hitBody = true;
           break;
         }
       }
-      if (killerByVictim.has(snake.id)) {
+      if (hitBody || killerByVictim.has(snake.id)) {
+        break;
+      }
+      if (killerByVictim.has(other.id)) {
+        continue;
+      }
+      if (now < other.shieldUntil) {
+        continue;
+      }
+      const otherHead = other.segments[0];
+      const otherPrevHead = other.prevHead ?? null;
+      const otherHeadRadius = Math.max(MIN_RADIUS * 0.7, radiusForSnake(other) * 0.55);
+      if (
+        collision.headsCollide(
+          prevHead,
+          head,
+          headRadius,
+          otherPrevHead,
+          otherHead,
+          otherHeadRadius,
+        )
+      ) {
+        for (const entry of collision.resolveHeadOnKills(snake, other)) {
+          if (!killerByVictim.has(entry.victimId)) {
+            killerByVictim.set(entry.victimId, entry.killerId);
+          }
+        }
         break;
       }
     }
@@ -1142,10 +1178,12 @@ function buildSharedWireState(room) {
       phase: room.match.phase,
       phaseEndsAt: room.match.phaseEndsAt,
       roundStartedAt: room.match.roundStartedAt,
-      arenaInsetRatio: room.match.arenaInsetRatio,
+      arenaRadiusRatio: room.match.arenaRadiusRatio,
+      arenaShape: usesCircularArena(room) ? 'circle' : 'rect',
       activeBanner: room.match.activeBanner,
       podium: room.match.podium,
       nextEvent: match.getNextEventTeaser(room.match, Date.now()),
+      nextShrink: match.getNextShrinkPreview(room.match, Date.now()),
       humanCount: countHumans(room),
     },
   };
@@ -1376,6 +1414,41 @@ function respawnSnakeInPlace(room, snake) {
   snake.roundScoreLocked = false;
 }
 
+function handleEmote(socket, payload) {
+  const room = getRoomBySocket(socket);
+  if (!room) {
+    sendError(socket, 'Join a room first.');
+    return;
+  }
+  const snake = getSnakeBySocket(socket);
+  if (!snake || snake.isBot) {
+    return;
+  }
+  const emoteId = emotes.normalizeEmoteId(payload.emoteId);
+  if (!emoteId) {
+    sendError(socket, 'Unknown emote.');
+    return;
+  }
+  const emote = emotes.getEmoteById(emoteId);
+  if (!emote) {
+    sendError(socket, 'Unknown emote.');
+    return;
+  }
+  const now = Date.now();
+  if (now - (snake.lastEmoteAt || 0) < emotes.EMOTE_COOLDOWN_MS) {
+    return;
+  }
+  snake.lastEmoteAt = now;
+  broadcastKillFeed(room, {
+    type: 'emote',
+    playerId: snake.id,
+    playerName: snake.name,
+    emoteId,
+    emoji: emote.emoji,
+    at: now,
+  });
+}
+
 function handleStartRound(socket) {
   const room = getRoomBySocket(socket);
   if (!room) {
@@ -1474,6 +1547,9 @@ function handleMessage(socket, raw) {
       break;
     case 'startRound':
       handleStartRound(socket);
+      break;
+    case 'emote':
+      handleEmote(socket, payload);
       break;
     case 'ping':
       handlePing(socket, payload);

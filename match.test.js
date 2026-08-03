@@ -27,19 +27,36 @@ describe('match', () => {
     assert.equal(result.transitionedTo, 'waiting');
   });
 
-  it('fires orb_rain at 20s and final_shrink at 120s once each', () => {
+  it('fires orb_rain and progressive circle shrinks', () => {
     const state = match.createMatchState();
     const t0 = 5_000_000;
     match.beginCountdown(state, t0, ['a', 'b']);
     match.tickMatch(state, t0 + match.COUNTDOWN_MS);
     const start = state.roundStartedAt;
+    assert.equal(state.arenaRadiusRatio, 1);
     let result = match.tickMatch(state, start + 20_000);
-    assert.deepEqual(result.eventsFired.map((e) => e.id), ['orb_rain']);
-    result = match.tickMatch(state, start + 20_000);
-    assert.deepEqual(result.eventsFired, []);
+    assert.deepEqual(result.eventsFired.map((event) => event.id), ['orb_rain']);
+    result = match.tickMatch(state, start + 60_000);
+    assert.deepEqual(result.eventsFired.map((event) => event.id), ['shrink_80']);
+    assert.equal(state.arenaRadiusRatio, 0.8);
     result = match.tickMatch(state, start + 120_000);
-    assert.deepEqual(result.eventsFired.map((e) => e.id), ['final_shrink']);
-    assert.equal(state.arenaInsetRatio, match.SHRINK_INSET_RATIO);
+    assert.deepEqual(result.eventsFired.map((event) => event.id), ['shrink_60']);
+    assert.equal(state.arenaRadiusRatio, 0.6);
+    result = match.tickMatch(state, start + 150_000);
+    assert.deepEqual(result.eventsFired.map((event) => event.id), ['shrink_30']);
+    assert.equal(state.arenaRadiusRatio, 0.3);
+  });
+
+  it('exposes the next shrink preview before it fires', () => {
+    const state = match.createMatchState();
+    const t0 = 9_000_000;
+    match.beginCountdown(state, t0, ['a', 'b']);
+    match.tickMatch(state, t0 + match.COUNTDOWN_MS);
+    const preview = match.getNextShrinkPreview(state, state.roundStartedAt + 45_000);
+    assert.ok(preview);
+    assert.equal(preview.radiusRatio, 0.8);
+    assert.equal(preview.percent, 80);
+    assert.equal(preview.startsInMs, 15_000);
   });
 
   it('ranks podium by score then join order, ignoring kills', () => {
@@ -75,7 +92,7 @@ describe('match', () => {
     assert.equal(podium[1].kills, 9);
   });
 
-  it('arenaBounds applies inset', () => {
+  it('arenaBounds applies inset for rectangular freeroam', () => {
     const bounds = match.arenaBounds(5000, 0.12);
     assert.equal(bounds.min, 600);
     assert.equal(bounds.max, 4400);

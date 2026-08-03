@@ -11,7 +11,7 @@
  * @property {Record<string, number>} killsByPlayerId
  * @property {string[]} firedEventIds
  * @property {null | { id: string; name: string; untilMs: number }} activeBanner
- * @property {number} arenaInsetRatio
+ * @property {number} arenaRadiusRatio
  * @property {PodiumEntry[]} podium
  */
 
@@ -30,16 +30,21 @@
  * @property {number} kills
  */
 
-const ROUND_MS = 150_000;
+const ROUND_MS = 180_000;
 const COUNTDOWN_MS = 3_000;
 const PODIUM_MS = 8_000;
 const KILL_SCORE_BONUS = 5;
-const SHRINK_INSET_RATIO = 0.12;
 const BANNER_MS = 2_000;
+const SHRINK_PREVIEW_MS = 20_000;
+
+/** Playable circle radius as a fraction of max (100% → 80% → 60% → 30%). */
+const ARENA_RADIUS_RATIOS = Object.freeze([1, 0.8, 0.6, 0.3]);
 
 const SCHEDULE = Object.freeze([
   { atMs: 20_000, id: 'orb_rain', name: 'Orb Rain' },
-  { atMs: 120_000, id: 'final_shrink', name: 'Final Shrink' },
+  { atMs: 60_000, id: 'shrink_80', name: 'Zone Shrinking', radiusRatio: 0.8 },
+  { atMs: 120_000, id: 'shrink_60', name: 'Zone Shrinking', radiusRatio: 0.6 },
+  { atMs: 150_000, id: 'shrink_30', name: 'Final Zone', radiusRatio: 0.3 },
 ]);
 
 /**
@@ -54,7 +59,7 @@ function createMatchState() {
     killsByPlayerId: {},
     firedEventIds: [],
     activeBanner: null,
-    arenaInsetRatio: 0,
+    arenaRadiusRatio: 1,
     podium: [],
   };
 }
@@ -84,7 +89,7 @@ function beginCountdown(match, nowMs, participantIds) {
   match.killsByPlayerId = {};
   match.firedEventIds = [];
   match.activeBanner = null;
-  match.arenaInsetRatio = 0;
+  match.arenaRadiusRatio = 1;
   match.podium = [];
 }
 
@@ -99,7 +104,7 @@ function tickMatch(match, nowMs) {
     match.roundStartedAt = nowMs;
     match.phaseEndsAt = nowMs + ROUND_MS;
     match.firedEventIds = [];
-    match.arenaInsetRatio = 0;
+    match.arenaRadiusRatio = 1;
     return { transitionedTo: 'playing', eventsFired: [] };
   }
   if (match.phase === 'playing') {
@@ -110,8 +115,8 @@ function tickMatch(match, nowMs) {
         eventsFired.push({ id: entry.id, name: entry.name });
         match.firedEventIds.push(entry.id);
         match.activeBanner = { id: entry.id, name: entry.name, untilMs: nowMs + BANNER_MS };
-        if (entry.id === 'final_shrink') {
-          match.arenaInsetRatio = SHRINK_INSET_RATIO;
+        if (typeof entry.radiusRatio === 'number') {
+          match.arenaRadiusRatio = entry.radiusRatio;
         }
       }
     }
@@ -164,7 +169,6 @@ function buildPodium(match, snakesById) {
       if (right.score !== left.score) {
         return right.score - left.score;
       }
-      // Kills are shown on the podium but never change place order.
       return match.participantIds.indexOf(left.id) - match.participantIds.indexOf(right.id);
     })
     .slice(0, 10)
@@ -184,10 +188,8 @@ function buildPodium(match, snakesById) {
  * @returns {{ min: number; max: number }}
  */
 function arenaBounds(mapSize, insetRatio) {
-  return {
-    min: mapSize * insetRatio,
-    max: mapSize * (1 - insetRatio),
-  };
+  const arena = require('./public/arena');
+  return arena.arenaBounds(mapSize, insetRatio);
 }
 
 /**
@@ -213,12 +215,39 @@ function getNextEventTeaser(match, nowMs) {
   return soonest;
 }
 
+/**
+ * @param {MatchState} match
+ * @param {number} nowMs
+ * @returns {{ radiusRatio: number; startsInMs: number; percent: number } | null}
+ */
+function getNextShrinkPreview(match, nowMs) {
+  if (match.phase !== 'playing') {
+    return null;
+  }
+  const elapsed = nowMs - match.roundStartedAt;
+  for (const entry of SCHEDULE) {
+    if (typeof entry.radiusRatio !== 'number' || match.firedEventIds.includes(entry.id)) {
+      continue;
+    }
+    const startsInMs = Math.max(0, entry.atMs - elapsed);
+    return {
+      radiusRatio: entry.radiusRatio,
+      startsInMs,
+      percent: Math.round(entry.radiusRatio * 100),
+    };
+  }
+  return null;
+}
+
 module.exports = {
   ROUND_MS,
   COUNTDOWN_MS,
   PODIUM_MS,
   KILL_SCORE_BONUS,
-  SHRINK_INSET_RATIO,
+  BANNER_MS,
+  SHRINK_PREVIEW_MS,
+  ARENA_RADIUS_RATIOS,
+  SCHEDULE,
   createMatchState,
   canStartRound,
   beginCountdown,
@@ -227,4 +256,5 @@ module.exports = {
   buildPodium,
   arenaBounds,
   getNextEventTeaser,
+  getNextShrinkPreview,
 };

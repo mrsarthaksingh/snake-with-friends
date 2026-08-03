@@ -31,6 +31,7 @@ const radarCanvas = document.getElementById('radar');
 const radarCtx = radarCanvas.getContext('2d');
 const powerPill = document.getElementById('powerPill');
 const boostButton = document.getElementById('boostButton');
+const emoteBar = document.getElementById('emoteBar');
 const startRoundButton = document.getElementById('startRoundButton');
 const matchTimerPill = document.getElementById('matchTimerPill');
 const matchEventTeaser = document.getElementById('matchEventTeaser');
@@ -53,6 +54,11 @@ const FOOD_DRAW_RADIUS = 1500;
 
 const SNAKE_SKINS = (globalThis.SnakeSkins && globalThis.SnakeSkins.SKINS) || [];
 const SKIN_BY_ID = (globalThis.SnakeSkins && globalThis.SnakeSkins.SKIN_BY_ID) || {};
+const EMOTE_CATALOG = (globalThis.SnakeEmotes && globalThis.SnakeEmotes.EMOTES) || [];
+const EMOTE_COOLDOWN_MS = (globalThis.SnakeEmotes && globalThis.SnakeEmotes.EMOTE_COOLDOWN_MS) || 2000;
+const EMOTE_FLOAT_MS = (globalThis.SnakeEmotes && globalThis.SnakeEmotes.EMOTE_FLOAT_MS) || 2000;
+const SnakeArena = globalThis.SnakeArena || {};
+const SHRINK_PREVIEW_MS = 20_000;
 
 /** @type {WebSocket | null} */
 let socket = null;
@@ -82,6 +88,7 @@ let keyboardAngle = null;
 let smoothCamera = { x: 2500, y: 2500 };
 let smoothZoom = 0.85;
 let lastFrameTime = performance.now();
+let skinAnimPhase = 0;
 let lastHudUpdate = 0;
 let pingMs = null;
 let awaitingPong = false;
@@ -143,6 +150,9 @@ let localKillCount = 0;
 let wasBoosting = false;
 let lastMatchPhase = '';
 let lastEventBannerName = '';
+/** @type {Map<string, { emoji: string, startedAt: number }>} */
+const activeEmotesByPlayerId = new Map();
+let emoteCooldownUntil = 0;
 
 function setKillsPill(count) {
   if (!killsPill) {
@@ -237,10 +247,47 @@ function getSelectedSkin() {
 }
 
 function skinPreviewBackground(skin) {
+  if (isPremiumSkin(skin)) {
+    const tertiary = skin.tertiary || skin.accent || skin.color;
+    return `linear-gradient(135deg, ${skin.color} 0%, ${skin.accent || skin.color} 45%, ${tertiary} 100%)`;
+  }
   if (skin.accent) {
     return `linear-gradient(135deg, ${skin.color} 35%, ${skin.accent} 100%)`;
   }
   return skin.color;
+}
+
+/** @type {Map<string, { r: number, g: number, b: number }>} */
+const skinRgbCache = new Map();
+
+function skinRgb(hex) {
+  const key = String(hex || '#ffffff');
+  const cached = skinRgbCache.get(key);
+  if (cached) {
+    return cached;
+  }
+  const value = key.replace('#', '');
+  const parsed = {
+    r: parseInt(value.slice(0, 2), 16),
+    g: parseInt(value.slice(2, 4), 16),
+    b: parseInt(value.slice(4, 6), 16),
+  };
+  skinRgbCache.set(key, parsed);
+  return parsed;
+}
+
+function mixSkinHex(hexA, hexB, amount) {
+  const left = skinRgb(hexA);
+  const right = skinRgb(hexB);
+  const t = Math.max(0, Math.min(1, amount));
+  const r = Math.round(left.r + (right.r - left.r) * t);
+  const g = Math.round(left.g + (right.g - left.g) * t);
+  const b = Math.round(left.b + (right.b - left.b) * t);
+  return `rgb(${r},${g},${b})`;
+}
+
+function isAnimatedSkin(skin) {
+  return Boolean(skin && typeof skin.anim === 'string' && skin.anim.length > 0);
 }
 
 function renderSnakePicker() {
@@ -248,20 +295,27 @@ function renderSnakePicker() {
   SNAKE_SKINS.forEach((skin) => {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = `skin-option${skin.id === selectedSkinId ? ' selected' : ''}${skin.premium ? ' premium' : ''}`;
+    const animClass = isAnimatedSkin(skin) ? ` skin-animated skin-anim-${skin.anim}` : '';
+    button.className =
+      `skin-option${skin.id === selectedSkinId ? ' selected' : ''}${skin.premium ? ' premium' : ''}${animClass}`;
     button.style.background = skinPreviewBackground(skin);
-    button.title = skin.premium ? `${skin.name} · Free premium` : skin.name;
+    const animLabel = isAnimatedSkin(skin) ? ' · Animated' : '';
+    button.title = skin.premium ? `${skin.name} · Free premium${animLabel}` : `${skin.name}${animLabel}`;
     button.setAttribute('role', 'option');
     button.setAttribute('aria-selected', skin.id === selectedSkinId ? 'true' : 'false');
     button.addEventListener('click', () => {
       selectedSkinId = skin.id;
-      skinNameEl.textContent = skin.premium ? `★ ${skin.name} · Free` : skin.name;
+      skinNameEl.textContent = skin.premium
+        ? `★ ${skin.name} · Free${isAnimatedSkin(skin) ? ' · Live' : ''}`
+        : skin.name;
       renderSnakePicker();
     });
     snakePicker.appendChild(button);
   });
   const selected = getSelectedSkin();
-  skinNameEl.textContent = selected.premium ? `★ ${selected.name} · Free` : selected.name;
+  skinNameEl.textContent = selected.premium
+    ? `★ ${selected.name} · Free${isAnimatedSkin(selected) ? ' · Live' : ''}`
+    : selected.name;
 }
 
 function normalizeRoomId(raw) {
@@ -656,6 +710,101 @@ function send(payload) {
   socket.send(JSON.stringify(payload));
 }
 
+function syncEmoteCooldownUi(now = performance.now()) {
+  const cooling = now < emoteCooldownUntil;
+  if (!emoteBar) {
+    return;
+  }
+  emoteBar.classList.toggle('cooling', cooling);
+  for (const button of emoteBar.querySelectorAll('.emote-btn')) {
+    button.disabled = cooling;
+  }
+}
+
+function startEmoteCooldown() {
+  emoteCooldownUntil = performance.now() + EMOTE_COOLDOWN_MS;
+  syncEmoteCooldownUi();
+}
+
+function queueEmoteBubble(targetPlayerId, emoji) {
+  if (!targetPlayerId || !emoji) {
+    return;
+  }
+  activeEmotesByPlayerId.set(targetPlayerId, {
+    emoji,
+    startedAt: performance.now(),
+  });
+}
+
+function sendEmote(emoteId) {
+  if (!joined || !emoteId) {
+    return;
+  }
+  if (performance.now() < emoteCooldownUntil) {
+    return;
+  }
+  const emote = EMOTE_CATALOG.find((entry) => entry.id === emoteId);
+  if (!emote) {
+    return;
+  }
+  send({ type: 'emote', emoteId });
+  startEmoteCooldown();
+  if (playerId) {
+    queueEmoteBubble(playerId, emote.emoji);
+  }
+}
+
+function buildEmoteBar() {
+  if (!emoteBar || EMOTE_CATALOG.length === 0) {
+    return;
+  }
+  emoteBar.replaceChildren();
+  EMOTE_CATALOG.forEach((emote, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'emote-btn';
+    button.textContent = emote.emoji;
+    button.title = `${emote.label} (${index + 1})`;
+    button.setAttribute('aria-label', emote.label);
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      sendEmote(emote.id);
+    });
+    emoteBar.appendChild(button);
+  });
+}
+
+function drawFloatingEmotes(state, camera, zoom, now) {
+  for (const [targetPlayerId, bubble] of [...activeEmotesByPlayerId.entries()]) {
+    const age = now - bubble.startedAt;
+    if (age > EMOTE_FLOAT_MS) {
+      activeEmotesByPlayerId.delete(targetPlayerId);
+      continue;
+    }
+    const player = state.players.find((entry) => entry.id === targetPlayerId);
+    if (!player || !player.segments || player.segments.length === 0) {
+      continue;
+    }
+    const radius = Math.max(4, (player.radius || 7) * zoom);
+    const head = worldToScreen(player.segments[0], camera, zoom);
+    const progress = age / EMOTE_FLOAT_MS;
+    const floatY = progress * 42;
+    const fadeIn = Math.min(1, age / 120);
+    const fadeOut = progress > 0.78 ? 1 - (progress - 0.78) / 0.22 : 1;
+    const alpha = fadeIn * fadeOut;
+    const pop = progress < 0.15 ? 0.85 + (progress / 0.15) * 0.35 : 1;
+    const fontSize = Math.max(18, radius * 1.35) * pop;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = `${fontSize}px "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(bubble.emoji, head.x, head.y - radius - 18 - floatY);
+    ctx.restore();
+  }
+  syncEmoteCooldownUi(now);
+}
+
 function isCompactMobileUi() {
   return window.matchMedia('(max-width: 920px) and (orientation: landscape)').matches
     || window.matchMedia('(max-height: 500px) and (orientation: landscape)').matches
@@ -796,9 +945,18 @@ function updateMatchUi(matchState, players) {
     }
   }
   if (matchEventTeaser) {
-    if (isArenaMode && matchState.nextEvent && matchState.phase === 'playing') {
-      matchEventTeaser.hidden = false;
-      matchEventTeaser.textContent = `${matchState.nextEvent.name} in ${formatRemaining(matchState.nextEvent.startsInMs)}`;
+    if (isArenaMode && matchState.phase === 'playing') {
+      if (matchState.nextShrink && matchState.nextShrink.startsInMs <= SHRINK_PREVIEW_MS) {
+        matchEventTeaser.hidden = false;
+        matchEventTeaser.textContent =
+          `Safe zone → ${matchState.nextShrink.percent}% in ${formatRemaining(matchState.nextShrink.startsInMs)}`;
+      } else if (matchState.nextEvent) {
+        matchEventTeaser.hidden = false;
+        matchEventTeaser.textContent =
+          `${matchState.nextEvent.name} in ${formatRemaining(matchState.nextEvent.startsInMs)}`;
+      } else {
+        matchEventTeaser.hidden = true;
+      }
     } else {
       matchEventTeaser.hidden = true;
     }
@@ -886,6 +1044,12 @@ function handleMessage(message) {
       joinOverlay.hidden = true;
       deathOverlay.hidden = true;
       hud.hidden = false;
+      if (emoteBar) {
+        emoteBar.hidden = false;
+      }
+      activeEmotesByPlayerId.clear();
+      emoteCooldownUntil = 0;
+      syncEmoteCooldownUi();
       smoothCamera = { x: mapSize / 2, y: mapSize / 2 };
       smoothZoom = 0.85;
       renderBodyById.clear();
@@ -911,6 +1075,7 @@ function handleMessage(message) {
         }
         lastSelfScore = nextScore;
       } else if (self && !self.alive) {
+        smoothCamera = { x: mapSize / 2, y: mapSize / 2 };
         lastSelfScore = 0;
       }
       scorePill.textContent = `Score ${self && self.alive ? self.score : 0}`;
@@ -946,11 +1111,14 @@ function handleMessage(message) {
       deathLine.textContent = message.line || 'Oof.';
       deathScore.textContent = `Score ${message.score}`;
       joinOverlay.hidden = true;
+      smoothCamera = getArenaCameraCenter();
       if (!podiumOverlay || podiumOverlay.hidden) {
         deathOverlay.hidden = false;
       }
       break;
     case 'spectating':
+      smoothCamera = getArenaCameraCenter();
+      smoothZoom = isCircularArenaState() ? 0.52 : 0.7;
       respawnButton.disabled = true;
       respawnButton.textContent = 'Wait for next round';
       if (spectateNote) {
@@ -978,6 +1146,14 @@ function handleMessage(message) {
       showFunnyDeath(message.line);
       break;
     }
+    case 'emote':
+      if (typeof message.playerId === 'string' && typeof message.emoji === 'string') {
+        queueEmoteBubble(message.playerId, message.emoji);
+        if (message.playerId === playerId) {
+          startEmoteCooldown();
+        }
+      }
+      break;
     case 'error':
       statusLine.textContent = message.message;
       break;
@@ -1042,6 +1218,23 @@ function lerpAngle(from, to, amount) {
   while (delta > Math.PI) delta -= Math.PI * 2;
   while (delta < -Math.PI) delta += Math.PI * 2;
   return from + delta * amount;
+}
+
+function getArenaCameraCenter() {
+  if (SnakeArena.arenaCenter) {
+    return SnakeArena.arenaCenter(mapSize);
+  }
+  return { x: mapSize / 2, y: mapSize / 2 };
+}
+
+function shouldUseSpectatorCamera(authSelf) {
+  if (!authSelf) {
+    return true;
+  }
+  if (!authSelf.alive || authSelf.spectating) {
+    return true;
+  }
+  return !authSelf.segments || authSelf.segments.length === 0;
 }
 
 /**
@@ -1109,8 +1302,8 @@ function buildRenderState(deltaMs) {
   if (!latestState) {
     return null;
   }
-  const headFollow = 1 - Math.exp(-deltaMs / 72);
-  const pathFollow = 1 - Math.exp(-deltaMs / 55);
+  const headFollow = 1 - Math.exp(-deltaMs / 60);
+  const pathFollow = 1 - Math.exp(-deltaMs / 48);
   const seen = new Set();
   const players = latestState.players.map((player) => {
     seen.add(player.id);
@@ -1223,37 +1416,132 @@ function buildRenderState(deltaMs) {
   return { ...latestState, players, foods: latestState.foods };
 }
 
+function isCircularArenaState(state = latestState) {
+  if (!state) {
+    return false;
+  }
+  if (state.match?.arenaShape === 'circle') {
+    return true;
+  }
+  return normalizeGameMode(state.mode || selectedGameMode) === 'arena';
+}
+
+function getArenaRadiusRatio(state = latestState) {
+  const ratio = state?.match?.arenaRadiusRatio;
+  return typeof ratio === 'number' && ratio > 0 ? ratio : 1;
+}
+
 function clampRenderPointToArena(point, radius) {
-  const insetRatio = latestState?.match?.arenaInsetRatio || 0;
-  const inset = insetRatio * mapSize;
-  const edge = 8 + Math.max(0, radius);
-  const min = inset + edge;
-  const max = mapSize - inset - edge;
+  const ratio = getArenaRadiusRatio();
+  if (isCircularArenaState()) {
+    const clamp = SnakeArena.clampPointToCircle;
+    if (typeof clamp === 'function') {
+      return clamp(point, radius, mapSize, ratio);
+    }
+  }
+  const edge = (SnakeArena.BORDER_PADDING || 8) + Math.max(0, radius);
+  const min = edge;
+  const max = mapSize - edge;
   return {
     x: Math.min(max, Math.max(min, point.x)),
     y: Math.min(max, Math.max(min, point.y)),
   };
 }
 
-function worldToScreen(point, camera, zoom) {
-  return {
-    x: (point.x - camera.x) * zoom + viewportSize.width / 2,
-    y: (point.y - camera.y) * zoom + viewportSize.height / 2,
-  };
+function drawCircleStroke(centerWorld, radiusWorld, camera, zoom, strokeStyle, lineWidth, dashed = false) {
+  const center = worldToScreen(centerWorld, camera, zoom);
+  const radius = radiusWorld * zoom;
+  ctx.beginPath();
+  if (dashed) {
+    ctx.setLineDash([12 * zoom, 10 * zoom]);
+  }
+  ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+  ctx.strokeStyle = strokeStyle;
+  ctx.lineWidth = lineWidth;
+  ctx.stroke();
+  if (dashed) {
+    ctx.setLineDash([]);
+  }
 }
 
-function drawBackground(camera, zoom) {
+function drawCircularArena(camera, zoom, state) {
   const width = viewportSize.width;
   const height = viewportSize.height;
+  const ratio = getArenaRadiusRatio(state);
+  const centerWorld = SnakeArena.arenaCenter
+    ? SnakeArena.arenaCenter(mapSize)
+    : { x: mapSize / 2, y: mapSize / 2 };
+  const playableR = SnakeArena.playableRadius
+    ? SnakeArena.playableRadius(mapSize, ratio)
+    : mapSize / 2;
+  const center = worldToScreen(centerWorld, camera, zoom);
+  const screenR = playableR * zoom;
+
   ctx.fillStyle = '#050d18';
   ctx.fillRect(0, 0, width, height);
 
-  const insetRatio = latestState?.match?.arenaInsetRatio || 0;
-  const inset = insetRatio * mapSize;
-  const arenaMin = inset;
-  const arenaMax = mapSize - inset;
+  ctx.fillStyle = 'rgba(120, 20, 30, 0.38)';
+  ctx.beginPath();
+  ctx.rect(0, 0, width, height);
+  ctx.arc(center.x, center.y, screenR, 0, Math.PI * 2, true);
+  ctx.fill('evenodd');
 
-  // Outside the arena — danger zone
+  const grid = 80;
+  const startX = Math.floor((camera.x - width / zoom / 2) / grid) * grid;
+  const startY = Math.floor((camera.y - height / zoom / 2) / grid) * grid;
+  const endX = camera.x + width / zoom / 2 + grid;
+  const endY = camera.y + height / zoom / 2 + grid;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(center.x, center.y, screenR, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.fillStyle = '#050d18';
+  ctx.fillRect(center.x - screenR, center.y - screenR, screenR * 2, screenR * 2);
+  ctx.strokeStyle = 'rgba(120, 160, 220, 0.08)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = startX; x <= endX; x += grid) {
+    const a = worldToScreen({ x, y: startY }, camera, zoom);
+    const b = worldToScreen({ x, y: endY }, camera, zoom);
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+  }
+  for (let y = startY; y <= endY; y += grid) {
+    const a = worldToScreen({ x: startX, y }, camera, zoom);
+    const b = worldToScreen({ x: endX, y }, camera, zoom);
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+  }
+  ctx.stroke();
+  ctx.restore();
+
+  const preview = state?.match?.nextShrink;
+  if (
+    preview &&
+    typeof preview.radiusRatio === 'number' &&
+    preview.startsInMs <= SHRINK_PREVIEW_MS
+  ) {
+    const previewR = SnakeArena.playableRadius(mapSize, preview.radiusRatio);
+    drawCircleStroke(
+      centerWorld,
+      previewR,
+      camera,
+      zoom,
+      'rgba(125, 255, 179, 0.9)',
+      Math.max(2, 4 * zoom),
+      true,
+    );
+  }
+
+  drawCircleStroke(centerWorld, playableR, camera, zoom, '#ff4d4d', Math.max(3, 6 * zoom));
+  drawCircleStroke(centerWorld, playableR, camera, zoom, 'rgba(255, 77, 77, 0.25)', Math.max(10, 18 * zoom));
+}
+
+function drawRectArena(camera, zoom) {
+  const width = viewportSize.width;
+  const height = viewportSize.height;
+  const arenaMin = 0;
+  const arenaMax = mapSize;
   const topLeft = worldToScreen({ x: arenaMin, y: arenaMin }, camera, zoom);
   const bottomRight = worldToScreen({ x: arenaMax, y: arenaMax }, camera, zoom);
   const arenaX = topLeft.x;
@@ -1264,7 +1552,6 @@ function drawBackground(camera, zoom) {
   ctx.fillRect(0, 0, width, height);
   ctx.fillStyle = '#050d18';
   ctx.fillRect(arenaX, arenaY, arenaW, arenaH);
-
   const grid = 80;
   const startX = Math.floor((camera.x - width / zoom / 2) / grid) * grid;
   const startY = Math.floor((camera.y - height / zoom / 2) / grid) * grid;
@@ -1291,7 +1578,6 @@ function drawBackground(camera, zoom) {
   }
   ctx.stroke();
   ctx.restore();
-
   ctx.strokeStyle = '#ff4d4d';
   ctx.lineWidth = Math.max(3, 6 * zoom);
   ctx.strokeRect(arenaX, arenaY, arenaW, arenaH);
@@ -1300,18 +1586,81 @@ function drawBackground(camera, zoom) {
   ctx.strokeRect(arenaX, arenaY, arenaW, arenaH);
 }
 
+function worldToScreen(point, camera, zoom) {
+  return {
+    x: (point.x - camera.x) * zoom + viewportSize.width / 2,
+    y: (point.y - camera.y) * zoom + viewportSize.height / 2,
+  };
+}
+
+function drawBackground(camera, zoom) {
+  const width = viewportSize.width;
+  const height = viewportSize.height;
+  ctx.fillStyle = '#050d18';
+  ctx.fillRect(0, 0, width, height);
+  if (isCircularArenaState()) {
+    drawCircularArena(camera, zoom, latestState);
+    return;
+  }
+  drawRectArena(camera, zoom);
+}
+
 function drawRadar(state) {
   const size = radarCanvas.width;
   const padding = 8;
   const playSize = size - padding * 2;
-  const insetRatio = state.match?.arenaInsetRatio || 0;
-  const inset = insetRatio * mapSize;
-  const arenaMin = inset;
-  const arenaMax = mapSize - inset;
-  const arenaSpan = arenaMax - arenaMin;
   radarCtx.clearRect(0, 0, size, size);
   radarCtx.fillStyle = 'rgba(5, 13, 24, 0.95)';
   radarCtx.fillRect(0, 0, size, size);
+  const circular = isCircularArenaState(state);
+  const ratio = getArenaRadiusRatio(state);
+  if (circular && SnakeArena.playableRadius) {
+    const maxR = SnakeArena.playableRadius(mapSize, 1);
+    const currentR = SnakeArena.playableRadius(mapSize, ratio);
+    const center = padding + playSize / 2;
+    const scale = playSize / (maxR * 2);
+    radarCtx.strokeStyle = 'rgba(255, 77, 77, 0.85)';
+    radarCtx.lineWidth = 2;
+    radarCtx.beginPath();
+    radarCtx.arc(center, center, currentR * scale, 0, Math.PI * 2);
+    radarCtx.stroke();
+    const preview = state.match?.nextShrink;
+    if (preview && preview.startsInMs <= SHRINK_PREVIEW_MS) {
+      radarCtx.strokeStyle = 'rgba(125, 255, 179, 0.75)';
+      radarCtx.setLineDash([4, 4]);
+      radarCtx.beginPath();
+      radarCtx.arc(center, center, preview.radiusRatio * maxR * scale, 0, Math.PI * 2);
+      radarCtx.stroke();
+      radarCtx.setLineDash([]);
+    }
+    const alivePlayers = state.players.filter((player) => player.alive && player.segments.length > 0);
+    const mapCenter = SnakeArena.arenaCenter ? SnakeArena.arenaCenter(mapSize) : { x: mapSize / 2, y: mapSize / 2 };
+    for (const player of alivePlayers) {
+      const head = player.segments[0];
+      const x = center + (head.x - mapCenter.x) * scale;
+      const y = center + (head.y - mapCenter.y) * scale;
+      const isYou = player.id === playerId;
+      const dot = isYou ? 5.5 : 3.8;
+      radarCtx.beginPath();
+      radarCtx.fillStyle = player.color;
+      radarCtx.arc(x, y, dot, 0, Math.PI * 2);
+      radarCtx.fill();
+      if (isYou) {
+        radarCtx.strokeStyle = '#ffffff';
+        radarCtx.lineWidth = 1.5;
+        radarCtx.stroke();
+        radarCtx.beginPath();
+        radarCtx.strokeStyle = '#ffffff';
+        radarCtx.moveTo(x, y);
+        radarCtx.lineTo(x + Math.cos(player.angle) * 9, y + Math.sin(player.angle) * 9);
+        radarCtx.stroke();
+      }
+    }
+    return;
+  }
+  const arenaMin = 0;
+  const arenaMax = mapSize;
+  const arenaSpan = arenaMax - arenaMin;
   radarCtx.strokeStyle = 'rgba(255, 77, 77, 0.85)';
   radarCtx.lineWidth = 2;
   radarCtx.strokeRect(padding, padding, playSize, playSize);
@@ -1561,15 +1910,225 @@ function resolveDrawSkin(snake) {
   };
 }
 
-function beadColorForSkin(skin, index, isHead) {
+function isPremiumSkin(skin) {
+  return Boolean(skin && skin.premium);
+}
+
+function skinTertiary(skin) {
+  return skin.tertiary || skin.accent || skin.color;
+}
+
+function beadColorForSkin(skin, index, isHead, phase = 0) {
   const accent = skin.accent || skin.color;
-  if (skin.style === 'stripe') {
+  const tertiary = skinTertiary(skin);
+  const premium = isPremiumSkin(skin);
+  if (isAnimatedSkin(skin)) {
+    if (skin.anim === 'flow') {
+      const band = Math.sin(phase * 2.4 - index * 0.68);
+      if (band > 0.65) {
+        return mixSkinHex(tertiary, '#ffffff', premium ? 0.45 : 0.25);
+      }
+      const blend = (band + 1) * 0.5;
+      return mixSkinHex(skin.color, accent, blend);
+    }
+    if (skin.anim === 'plasma') {
+      const flicker =
+        Math.sin(phase * 5.2 + index * 1.4) * Math.sin(phase * 3.5 + index * 0.75);
+      const amount = premium ? (flicker + 1) * 0.55 : (flicker + 1) * 0.35;
+      return mixSkinHex(skin.color, accent, amount);
+    }
+    if (skin.anim === 'inferno') {
+      const heat = isHead ? 1 : Math.max(0.15, 1 - index * 0.035);
+      const flicker = Math.sin(phase * 2.6 + index * 0.3) * 0.18;
+      return mixSkinHex(skin.color, tertiary, Math.min(1, heat * 0.72 + flicker));
+    }
+    if (skin.anim === 'wave') {
+      const wave = (Math.sin(phase * (premium ? 2.1 : 1.6) + index * 0.42) + 1) * 0.5;
+      if (premium && wave > 0.82) {
+        return mixSkinHex(accent, tertiary, 0.55);
+      }
+      return mixSkinHex(skin.color, accent, wave);
+    }
+    if (skin.anim === 'cycle') {
+      const wave = (Math.sin(phase * (premium ? 3 : 2.4) + index * 0.55) + 1) * 0.5;
+      return mixSkinHex(mixSkinHex(skin.color, accent, wave), tertiary, premium ? wave * 0.35 : 0);
+    }
+    if (skin.anim === 'pulse') {
+      const pulse = (Math.sin(phase * 2.8 + (premium ? index * 0.12 : 0)) + 1) * 0.5;
+      if (isHead || premium) {
+        return mixSkinHex(skin.color, accent, pulse);
+      }
+      return skin.color;
+    }
+    if (skin.anim === 'shimmer') {
+      const base = skin.style === 'stripe'
+        ? (index % 2 === 0 ? skin.color : accent)
+        : skin.color;
+      const shine = premium
+        ? 0.18 + 0.28 * Math.sin(phase * 3.4 + index * 0.52)
+        : 0.1 + 0.12 * Math.sin(phase * 3.1 + index * 0.48);
+      return mixSkinHex(base, '#ffffff', shine);
+    }
+  }
+  if (skin.style === 'stripe' || skin.style === 'scale') {
     return index % 2 === 0 ? skin.color : accent;
   }
-  if (skin.style === 'dual') {
+  if (skin.style === 'dual' || skin.style === 'royal') {
     return isHead ? accent : skin.color;
   }
   return skin.color;
+}
+
+function shouldDrawSkinGlow(skin, index, isHead) {
+  if (isPremiumSkin(skin)) {
+    return isHead || index % 2 === 0;
+  }
+  if (skin.style === 'glow' || skin.style === 'plasma' || skin.style === 'nebula') {
+    if (!isAnimatedSkin(skin)) {
+      return true;
+    }
+    return isHead || index % 4 === 0;
+  }
+  return false;
+}
+
+function drawBeadGradient(x, y, beadRadius, fill, premium) {
+  const highlight = mixSkinHex(fill, '#ffffff', premium ? 0.58 : 0.22);
+  const shadow = mixSkinHex(fill, '#000000', premium ? 0.42 : 0.18);
+  const gradient = ctx.createRadialGradient(
+    x - beadRadius * 0.32,
+    y - beadRadius * 0.34,
+    beadRadius * 0.08,
+    x,
+    y,
+    beadRadius,
+  );
+  gradient.addColorStop(0, highlight);
+  gradient.addColorStop(0.52, fill);
+  gradient.addColorStop(1, shadow);
+  return gradient;
+}
+
+function drawPremiumScaleMark(x, y, beadRadius, accent, index) {
+  const arcY = y - beadRadius * (index % 2 === 0 ? 0.12 : 0.28);
+  ctx.beginPath();
+  ctx.strokeStyle = mixSkinHex(accent, '#000000', 0.35);
+  ctx.lineWidth = Math.max(1, beadRadius * 0.1);
+  ctx.arc(x, arcY, beadRadius * 0.38, Math.PI * 0.12, Math.PI * 0.88);
+  ctx.stroke();
+}
+
+function drawPremiumNebulaSpeck(x, y, beadRadius, tertiary, index, phase) {
+  const sparkle = Math.sin(phase * 4 + index * 2.1);
+  if (sparkle < 0.55) {
+    return;
+  }
+  const angle = phase * 1.7 + index * 1.3;
+  const dist = beadRadius * (0.15 + (sparkle - 0.55) * 0.9);
+  ctx.beginPath();
+  ctx.fillStyle = mixSkinHex(tertiary, '#ffffff', 0.6);
+  ctx.arc(x + Math.cos(angle) * dist, y + Math.sin(angle) * dist, beadRadius * 0.12, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawPremiumCrown(x, y, beadRadius, accent) {
+  const crownY = y - beadRadius * 0.95;
+  ctx.fillStyle = accent;
+  ctx.beginPath();
+  ctx.moveTo(x - beadRadius * 0.55, crownY + beadRadius * 0.2);
+  ctx.lineTo(x - beadRadius * 0.35, crownY - beadRadius * 0.15);
+  ctx.lineTo(x - beadRadius * 0.12, crownY + beadRadius * 0.05);
+  ctx.lineTo(x, crownY - beadRadius * 0.35);
+  ctx.lineTo(x + beadRadius * 0.12, crownY + beadRadius * 0.05);
+  ctx.lineTo(x + beadRadius * 0.35, crownY - beadRadius * 0.15);
+  ctx.lineTo(x + beadRadius * 0.55, crownY + beadRadius * 0.2);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawPremiumSparkles(headX, headY, angle, radius, skin, phase) {
+  const accent = skin.accent || skin.color;
+  for (let spark = 0; spark < 4; spark += 1) {
+    const offset = phase * 3.5 + spark * 1.6;
+    const dist = radius * (1.4 + (spark % 2) * 0.35);
+    const spread = angle + Math.PI + (spark - 1.5) * 0.45;
+    const x = headX + Math.cos(spread) * dist + Math.sin(offset) * 4;
+    const y = headY + Math.sin(spread) * dist + Math.cos(offset) * 4;
+    const alpha = 0.35 + (Math.sin(offset * 2) + 1) * 0.25;
+    ctx.beginPath();
+    ctx.fillStyle = mixSkinHex(accent, '#ffffff', 0.5);
+    ctx.globalAlpha = alpha;
+    ctx.arc(x, y, Math.max(1.5, radius * 0.14), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawSnakeBead(point, beadRadius, fill, skin, index, isHead, phase) {
+  const premium = isPremiumSkin(skin);
+  const accent = skin.accent || fill;
+  const tertiary = skinTertiary(skin);
+  if (shouldDrawSkinGlow(skin, index, isHead)) {
+    const glowColor = isAnimatedSkin(skin) && isHead
+      ? mixSkinHex(accent, tertiary, (Math.sin(phase * 2.2) + 1) * 0.5)
+      : accent;
+    const glowScale = premium ? (isHead ? 2.05 : 1.65) : 1.45;
+    const glowAlpha = premium ? (isHead ? '66' : '44') : '55';
+    ctx.beginPath();
+    ctx.fillStyle = `${glowColor}${glowAlpha}`;
+    ctx.arc(point.x, point.y, beadRadius * glowScale, 0, Math.PI * 2);
+    ctx.fill();
+    if (premium && isHead) {
+      ctx.beginPath();
+      ctx.fillStyle = `${tertiary}33`;
+      ctx.arc(point.x, point.y, beadRadius * 2.35, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  if (skin.style === 'ring' || skin.style === 'metallic') {
+    ctx.beginPath();
+    ctx.fillStyle = accent;
+    ctx.arc(point.x, point.y, beadRadius * 1.1, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  if (skin.style === 'royal' && !isHead && index % 5 === 0) {
+    ctx.beginPath();
+    ctx.strokeStyle = mixSkinHex(accent, '#ffffff', 0.35);
+    ctx.lineWidth = Math.max(1, beadRadius * 0.14);
+    ctx.arc(point.x, point.y, beadRadius * 1.05, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  const innerRadius = skin.style === 'ring' || skin.style === 'metallic' ? beadRadius * 0.8 : beadRadius;
+  ctx.beginPath();
+  ctx.fillStyle = premium ? drawBeadGradient(point.x, point.y, innerRadius, fill, true) : fill;
+  ctx.arc(point.x, point.y, innerRadius, 0, Math.PI * 2);
+  ctx.fill();
+  if (premium) {
+    ctx.beginPath();
+    ctx.fillStyle = 'rgba(255,255,255,0.72)';
+    ctx.arc(
+      point.x - innerRadius * 0.28,
+      point.y - innerRadius * 0.32,
+      innerRadius * (isHead ? 0.26 : 0.18),
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+  } else if (!isHead) {
+    ctx.beginPath();
+    ctx.fillStyle = 'rgba(255,255,255,0.14)';
+    ctx.arc(point.x - beadRadius * 0.25, point.y - beadRadius * 0.25, beadRadius * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  if (premium && skin.style === 'scale') {
+    drawPremiumScaleMark(point.x, point.y, innerRadius, accent, index);
+  }
+  if (premium && skin.style === 'nebula') {
+    drawPremiumNebulaSpeck(point.x, point.y, innerRadius, tertiary, index, phase);
+  }
+  if (premium && isHead && (skin.style === 'royal' || skin.style === 'metallic')) {
+    drawPremiumCrown(point.x, point.y, innerRadius, accent);
+  }
 }
 
 function drawSnake(snake, camera, zoom) {
@@ -1580,6 +2139,9 @@ function drawSnake(snake, camera, zoom) {
   const isSelf = snake.id === playerId;
   const skin = resolveDrawSkin(snake);
   const head = worldToScreen(snake.segments[0], camera, zoom);
+  const spineColor = isAnimatedSkin(skin)
+    ? beadColorForSkin(skin, 0, true, skinAnimPhase)
+    : skin.color;
   // Long snakes can kill with a body that crosses the screen while the head is off-camera —
   // do not cull by head alone.
   if (!isSelf && !isSnakeNearViewport(snake, camera, zoom)) {
@@ -1589,7 +2151,7 @@ function drawSnake(snake, camera, zoom) {
   // Spine stroke fills any residual gaps so thick snakes stay continuous.
   if (snake.segments.length > 1) {
     ctx.beginPath();
-    ctx.strokeStyle = skin.color;
+    ctx.strokeStyle = spineColor;
     ctx.lineWidth = Math.max(2, radius * 1.72);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -1605,35 +2167,17 @@ function drawSnake(snake, camera, zoom) {
     const point = worldToScreen(snake.segments[index], camera, zoom);
     const isHead = index === 0;
     const beadRadius = isHead ? radius * 1.22 : radius * 0.98;
-    const fill = beadColorForSkin(skin, index, isHead);
-    if (skin.style === 'glow') {
-      ctx.beginPath();
-      ctx.fillStyle = `${skin.accent || fill}55`;
-      ctx.arc(point.x, point.y, beadRadius * 1.45, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    const fill = beadColorForSkin(skin, index, isHead, skinAnimPhase);
     if (isSelf && isHead) {
       ctx.beginPath();
       ctx.fillStyle = `${fill}44`;
       ctx.arc(point.x, point.y, beadRadius * 1.35, 0, Math.PI * 2);
       ctx.fill();
     }
-    if (skin.style === 'ring') {
-      ctx.beginPath();
-      ctx.fillStyle = skin.accent || '#ffffff';
-      ctx.arc(point.x, point.y, beadRadius * 1.12, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.beginPath();
-    ctx.fillStyle = fill;
-    ctx.arc(point.x, point.y, skin.style === 'ring' ? beadRadius * 0.82 : beadRadius, 0, Math.PI * 2);
-    ctx.fill();
-    if (!isHead) {
-      ctx.beginPath();
-      ctx.fillStyle = 'rgba(255,255,255,0.14)';
-      ctx.arc(point.x - beadRadius * 0.25, point.y - beadRadius * 0.25, beadRadius * 0.35, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    drawSnakeBead(point, beadRadius, fill, skin, index, isHead, skinAnimPhase);
+  }
+  if (isPremiumSkin(skin) && isAnimatedSkin(skin)) {
+    drawPremiumSparkles(head.x, head.y, snake.angle, radius, skin, skinAnimPhase);
   }
   if (isSelf && (snake.boosting || snake.hasSpeed)) {
     ctx.strokeStyle = snake.hasSpeed ? 'rgba(0,229,255,0.9)' : 'rgba(255,255,255,0.55)';
@@ -1691,23 +2235,30 @@ function sendInput() {
 function frame(now) {
   const deltaMs = Math.min(40, now - lastFrameTime);
   lastFrameTime = now;
+  skinAnimPhase = now * 0.002;
   const state = buildRenderState(deltaMs);
   const self = state ? getSelfSnake(state) : null;
+  const authSelf = latestState ? getSelfSnake(latestState) : null;
   const zoomFollow = 1 - Math.exp(-deltaMs / 80);
   if (state) {
-    if (self && self.alive && self.segments[0]) {
-      // Hard-lock camera to smoothed head — second camera lerp was fighting it.
-      smoothCamera.x = self.segments[0].x;
-      smoothCamera.y = self.segments[0].y;
-      // Soft zoom-out — old 14/radius dropped to ~0.45 and made fat snakes look stuck.
-      const safeRadius = Math.max(7, self.radius || 7);
+    if (shouldUseSpectatorCamera(authSelf)) {
+      const target = getArenaCameraCenter();
+      smoothCamera.x = target.x;
+      smoothCamera.y = target.y;
+      const spectatorZoom = isCircularArenaState() ? 0.52 : 0.7;
+      smoothZoom = lerp(smoothZoom, spectatorZoom, zoomFollow);
+    } else if (authSelf && authSelf.segments[0]) {
+      const head = authSelf.segments[0];
+      const cameraFollow = 1 - Math.exp(-deltaMs / 45);
+      smoothCamera.x = lerp(smoothCamera.x, head.x, cameraFollow);
+      smoothCamera.y = lerp(smoothCamera.y, head.y, cameraFollow);
+      const safeRadius = Math.max(7, authSelf.radius || 7);
       const targetZoom = Math.max(0.72, Math.min(1.18, 0.58 + 7.8 / safeRadius));
       smoothZoom = lerp(smoothZoom, targetZoom, zoomFollow);
     } else {
-      const targetCamera = { x: mapSize / 2, y: mapSize / 2 };
-      const cameraFollow = 1 - Math.exp(-deltaMs / 50);
-      smoothCamera.x = lerp(smoothCamera.x, targetCamera.x, cameraFollow);
-      smoothCamera.y = lerp(smoothCamera.y, targetCamera.y, cameraFollow);
+      const target = getArenaCameraCenter();
+      smoothCamera.x = target.x;
+      smoothCamera.y = target.y;
       smoothZoom = lerp(smoothZoom, 0.7, zoomFollow);
     }
     drawBackground(smoothCamera, smoothZoom);
@@ -1719,6 +2270,7 @@ function frame(now) {
     if (self) {
       drawSnake(self, smoothCamera, smoothZoom);
     }
+    drawFloatingEmotes(state, smoothCamera, smoothZoom, now);
     radarFrame += 1;
     if (radarFrame % 2 === 0) {
       drawRadar(state);
@@ -1727,16 +2279,8 @@ function frame(now) {
     ctx.fillStyle = '#050d18';
     ctx.fillRect(0, 0, viewportSize.width, viewportSize.height);
   }
-  sendInputThrottled();
+  sendInput();
   requestAnimationFrame(frame);
-}
-
-let inputFrame = 0;
-function sendInputThrottled() {
-  inputFrame += 1;
-  if (inputFrame % 2 === 0) {
-    sendInput();
-  }
 }
 
 let joinSubmitLockUntil = 0;
@@ -1812,7 +2356,7 @@ window.addEventListener('mousedown', (event) => {
   if (!joined || !deathOverlay.hidden) {
     return;
   }
-  if (event.target === boostButton) {
+  if (event.target === boostButton || (event.target instanceof Element && event.target.closest('.emote-bar'))) {
     return;
   }
   boostHeldByPointer = true;
@@ -1857,6 +2401,15 @@ window.addEventListener('keydown', (event) => {
   if (ARROW_ANGLES[event.code] != null) {
     event.preventDefault();
     keyboardAngle = ARROW_ANGLES[event.code];
+    return;
+  }
+  const digit = Number(event.key);
+  if (joined && Number.isInteger(digit) && digit >= 1 && digit <= EMOTE_CATALOG.length) {
+    event.preventDefault();
+    const emote = EMOTE_CATALOG[digit - 1];
+    if (emote) {
+      sendEmote(emote.id);
+    }
   }
 });
 
@@ -1948,6 +2501,7 @@ function bindBoostButton() {
 }
 
 bindBoostButton();
+buildEmoteBar();
 bindMuteButtons();
 bindFullscreenControls();
 bindLandscapePreference();
