@@ -72,6 +72,32 @@ let playerId = null;
 let playerName = '';
 /** @type {string} */
 let currentRoomId = 'LOBBY';
+
+const DEFAULT_MULTI_ROOM_ID = 'LOBBY';
+let defaultArenaRoomId = 'ARENA';
+
+function defaultRoomIdForMode(mode) {
+  const safe = normalizeGameMode(mode);
+  if (safe === 'arena') {
+    return defaultArenaRoomId;
+  }
+  return DEFAULT_MULTI_ROOM_ID;
+}
+
+function isDefaultRoomForAnotherMode(roomId, mode) {
+  const normalized = normalizeRoomId(roomId);
+  if (!normalized) {
+    return false;
+  }
+  const safe = normalizeGameMode(mode);
+  if (safe !== 'arena' && normalized === defaultArenaRoomId) {
+    return true;
+  }
+  if (safe !== 'multi' && normalized === DEFAULT_MULTI_ROOM_ID) {
+    return true;
+  }
+  return false;
+}
 /** @type {string} */
 let selectedSkinId = SNAKE_SKINS[0] ? SNAKE_SKINS[0].id : 'viper_green';
 /** @type {object | null} */
@@ -283,7 +309,13 @@ function mixSkinHex(hexA, hexB, amount) {
   const r = Math.round(left.r + (right.r - left.r) * t);
   const g = Math.round(left.g + (right.g - left.g) * t);
   const b = Math.round(left.b + (right.b - left.b) * t);
-  return `rgb(${r},${g},${b})`;
+  return `#${[r, g, b].map((channel) => channel.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function colorWithAlpha(color, alpha) {
+  const safeAlpha = Math.max(0, Math.min(1, alpha));
+  const { r, g, b } = skinRgb(color);
+  return `rgba(${r},${g},${b},${safeAlpha})`;
 }
 
 function isAnimatedSkin(skin) {
@@ -407,6 +439,14 @@ function syncModeLobbyUi() {
   if (roomInput) {
     roomInput.disabled = isSingle;
     roomInput.required = !isSingle;
+    if (!isSingle) {
+      const currentRoom = normalizeRoomId(roomInput.value);
+      if (!currentRoom || isDefaultRoomForAnotherMode(currentRoom, selectedGameMode)) {
+        const nextRoom = defaultRoomIdForMode(selectedGameMode);
+        roomInput.value = nextRoom;
+        currentRoomId = nextRoom;
+      }
+    }
   }
   if (roomHint) {
     if (isSingle) {
@@ -1019,9 +1059,12 @@ function handleMessage(message) {
       if (typeof message.speedPowerMultiplier === 'number') {
         speedPowerMultiplier = message.speedPowerMultiplier;
       }
-      if (typeof message.defaultRoomId === 'string' && roomInput && !roomInput.value.trim()) {
-        roomInput.value = message.defaultRoomId;
-        currentRoomId = message.defaultRoomId;
+      if (typeof message.defaultArenaRoomId === 'string') {
+        defaultArenaRoomId = message.defaultArenaRoomId;
+      }
+      if (roomInput && !roomInput.value.trim()) {
+        roomInput.value = defaultRoomIdForMode(selectedGameMode);
+        currentRoomId = roomInput.value;
       }
       statusLine.textContent = 'Connected · choose a mode and enter';
       break;
@@ -1231,7 +1274,7 @@ function shouldUseSpectatorCamera(authSelf) {
   if (!authSelf) {
     return true;
   }
-  if (!authSelf.alive || authSelf.spectating) {
+  if (!authSelf.alive) {
     return true;
   }
   return !authSelf.segments || authSelf.segments.length === 0;
@@ -2073,14 +2116,14 @@ function drawSnakeBead(point, beadRadius, fill, skin, index, isHead, phase) {
       ? mixSkinHex(accent, tertiary, (Math.sin(phase * 2.2) + 1) * 0.5)
       : accent;
     const glowScale = premium ? (isHead ? 2.05 : 1.65) : 1.45;
-    const glowAlpha = premium ? (isHead ? '66' : '44') : '55';
+    const glowAlpha = premium ? (isHead ? 0.4 : 0.27) : 0.33;
     ctx.beginPath();
-    ctx.fillStyle = `${glowColor}${glowAlpha}`;
+    ctx.fillStyle = colorWithAlpha(glowColor, glowAlpha);
     ctx.arc(point.x, point.y, beadRadius * glowScale, 0, Math.PI * 2);
     ctx.fill();
     if (premium && isHead) {
       ctx.beginPath();
-      ctx.fillStyle = `${tertiary}33`;
+      ctx.fillStyle = colorWithAlpha(tertiary, 0.2);
       ctx.arc(point.x, point.y, beadRadius * 2.35, 0, Math.PI * 2);
       ctx.fill();
     }
@@ -2170,7 +2213,7 @@ function drawSnake(snake, camera, zoom) {
     const fill = beadColorForSkin(skin, index, isHead, skinAnimPhase);
     if (isSelf && isHead) {
       ctx.beginPath();
-      ctx.fillStyle = `${fill}44`;
+      ctx.fillStyle = colorWithAlpha(fill, 0.27);
       ctx.arc(point.x, point.y, beadRadius * 1.35, 0, Math.PI * 2);
       ctx.fill();
     }
@@ -2518,10 +2561,10 @@ pointerY = viewportSize.height / 2;
 const urlMode = readModeFromUrl();
 setSelectedGameMode(urlMode);
 const urlRoom = readRoomFromUrl();
-if (urlRoom.length >= 3 && roomInput && urlMode !== 'single') {
-  roomInput.value = urlRoom;
-  currentRoomId = urlRoom;
-  updateRoomPill(urlRoom, urlMode);
+if (roomInput && urlMode !== 'single') {
+  roomInput.value = urlRoom.length >= 3 ? urlRoom : defaultRoomIdForMode(urlMode);
+  currentRoomId = roomInput.value;
+  updateRoomPill(roomInput.value, urlMode);
 }
 renderSnakePicker();
 connect();

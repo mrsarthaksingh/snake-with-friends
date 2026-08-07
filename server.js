@@ -21,6 +21,7 @@ const collision = require('./collision');
 
 const PORT = Number(process.env.PORT || process.env.SNAKE_PORT) || 3848;
 const DEFAULT_ROOM_ID = 'LOBBY';
+const DEFAULT_ARENA_ROOM_ID = 'ARENA';
 const MAX_ROOM_ID_LENGTH = 12;
 const ROOM_CLEANUP_MS = 30 * 60 * 1000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -240,7 +241,7 @@ const MIME_TYPES = Object.freeze({
 
 /** @type {Map<string, Room>} */
 const rooms = new Map();
-/** @type {WeakMap<import('ws').WebSocket, { roomId: string, snakeId: string }>} */
+/** @type {WeakMap<import('ws').WebSocket, { roomKey: string, snakeId: string }>} */
 const socketToMeta = new WeakMap();
 
 function normalizeRoomId(raw) {
@@ -274,17 +275,30 @@ function createRoom(roomId, mode = 'multi') {
 }
 
 /**
+ * Same room code can exist per mode (e.g. LOBBY for multi and LOBBY for arena).
+ * @param {string} mode
+ * @param {string} rawRoomId
+ * @returns {string}
+ */
+function roomStorageKey(mode, rawRoomId) {
+  const displayId = normalizeRoomId(rawRoomId);
+  const normalizedMode = gameMode.normalizeMode(mode, 'multi');
+  return `${normalizedMode}:${displayId}`;
+}
+
+/**
  * @param {string} rawRoomId
  * @param {string} [mode]
  */
 function getOrCreateRoom(rawRoomId, mode = 'multi') {
-  const roomId = normalizeRoomId(rawRoomId);
-  let room = rooms.get(roomId);
+  const displayId = normalizeRoomId(rawRoomId);
+  const key = roomStorageKey(mode, displayId);
+  let room = rooms.get(key);
   if (!room) {
-    room = createRoom(roomId, mode);
+    room = createRoom(displayId, mode);
     seedFood(room);
-    rooms.set(roomId, room);
-    console.log(`Room opened: ${roomId} (${room.mode})`);
+    rooms.set(key, room);
+    console.log(`Room opened: ${displayId} (${room.mode})`);
   }
   room.lastActiveAt = Date.now();
   return room;
@@ -295,7 +309,7 @@ function getRoomBySocket(socket) {
   if (!meta) {
     return null;
   }
-  return rooms.get(meta.roomId) ?? null;
+  return rooms.get(meta.roomKey) ?? null;
 }
 
 function countHumansInRoom(room) {
@@ -1285,7 +1299,7 @@ function getSnakeBySocket(socket) {
   if (!meta) {
     return null;
   }
-  const room = rooms.get(meta.roomId);
+  const room = rooms.get(meta.roomKey);
   return room ? room.snakes.get(meta.snakeId) ?? null : null;
 }
 
@@ -1307,7 +1321,8 @@ function handleJoin(socket, payload) {
   let requestedRoomId = typeof payload.roomId === 'string' ? payload.roomId : '';
   if (joinMode === 'single') {
     const normalized = normalizeRoomId(requestedRoomId);
-    const existingSolo = rooms.get(normalized);
+    const soloKey = roomStorageKey('single', normalized);
+    const existingSolo = rooms.get(soloKey);
     // Reuse empty solo room on respawn; otherwise mint a private room.
     if (
       existingSolo &&
@@ -1320,14 +1335,6 @@ function handleJoin(socket, payload) {
     }
   }
   const room = getOrCreateRoom(requestedRoomId, joinMode);
-  const mismatch = gameMode.modeMismatchMessage(
-    gameMode.normalizeMode(room.mode, 'multi'),
-    joinMode,
-  );
-  if (mismatch) {
-    sendError(socket, mismatch);
-    return;
-  }
   if (room.mode === 'single' && countHumans(room) >= 1) {
     sendError(socket, gameMode.singleCapacityMessage());
     return;
@@ -1354,7 +1361,7 @@ function handleJoin(socket, payload) {
     snake.spectating = true;
   }
   room.snakes.set(snake.id, snake);
-  socketToMeta.set(socket, { roomId: room.id, snakeId: snake.id });
+  socketToMeta.set(socket, { roomKey: roomStorageKey(room.mode, room.id), snakeId: snake.id });
   maintainBots(room);
   socket.send(JSON.stringify({
     type: 'joined',
@@ -1515,7 +1522,7 @@ function removeSocket(socket) {
   if (!meta) {
     return;
   }
-  const room = rooms.get(meta.roomId);
+  const room = rooms.get(meta.roomKey);
   const snake = room ? room.snakes.get(meta.snakeId) : null;
   if (room && snake) {
     if (snake.alive) {
@@ -1629,6 +1636,7 @@ webSocketServer.on('connection', (socket) => {
     playerCount: countHumans(defaultRoom),
     botCount: countBots(defaultRoom),
     defaultRoomId: DEFAULT_ROOM_ID,
+    defaultArenaRoomId: DEFAULT_ARENA_ROOM_ID,
     mapSize: MAP_SIZE,
     skins: SKINS,
     tickRate: TICK_RATE,
